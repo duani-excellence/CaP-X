@@ -97,3 +97,7 @@ runs/
 # Private API configuration
 .env.local
 .env.api.local
+
+# Existing vendored dependencies remain local directories
+/capx/third_party/
+/runtime/
