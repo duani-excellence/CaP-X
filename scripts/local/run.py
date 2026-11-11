@@ -11,7 +11,15 @@ def run():
     p.add_argument("--backend", choices=["ollama", "vllm", "openrouter", "cloud", "deepseek", "openai", "chatgpt"], default=os.getenv("CAPX_LLM_BACKEND", "ollama"))
     p.add_argument("--trials", type=int, default=1)
     p.add_argument("--output-dir")
+    p.add_argument('--snapshot-manifest')
+    p.add_argument('--pilot-phase', choices=['prepare','oracle','models'])
     a = p.parse_args()
+    if a.snapshot_manifest:
+        if not a.pilot_phase or not a.output_dir:
+            p.error('--snapshot-manifest requires --pilot-phase and --output-dir')
+        from capx.experiments.pilot import run as pilot_run
+        pilot_run(a.snapshot_manifest, a.pilot_phase, a.output_dir)
+        return
     configs = {
         "oracle": "env_configs/human_oracle_code/robosuite/franka_robosuite_cube_stack_privileged_oracle.yaml",
         "privileged": "env_configs/cube_stack/franka_robosuite_cube_stack_privileged.yaml",

@@ -101,6 +101,9 @@ class ModelQueryArgs:
     max_tokens: int = 4096
     reasoning_effort: str = "medium"
     debug: bool = False
+    max_attempts: int = 2
+    request_timeout: float = 200
+    response_observer: Any = None
 
 
 def collapse_text_image_inputs(messages: list[dict]) -> list[dict]:
@@ -260,19 +263,27 @@ def query_model(args: "LaunchArgs | ModelQueryArgs", prompt: list[dict]) -> str:
     prompt_sent_at = _iso_now()
     start_time = time.time()
 
-    # keep calling until it works
-    response = audited_post(
-        server_url, headers=headers, data=json.dumps(payload), timeout=200
-    )
-    retry = 1
-    while response.status_code in [404, 500, 502, 503, 504]:
-        sleep_time = 240 + random.uniform(-90, 90)
-        print(f"Retry {retry}. Model query failed with status code {response.status_code}. Error: {response.text}. Retrying in {sleep_time} seconds...")
-        time.sleep(sleep_time)
-        response = audited_post(
-            server_url, headers=headers, data=json.dumps(payload), timeout=200
-        )
-        retry += 1
+    attempts = max(1, min(2, getattr(args, 'max_attempts', 2)))
+    response = None
+    for attempt in range(1, attempts + 1):
+        try:
+            response = audited_post(server_url, headers=headers, data=json.dumps(payload),
+                                    timeout=getattr(args, 'request_timeout', 200), allow_redirects=False)
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            if getattr(args, 'response_observer', None):
+                args.response_observer(attempt, payload, None, type(exc).__name__)
+            if attempt == attempts:
+                raise
+            time.sleep(1)
+            continue
+        if getattr(args, 'response_observer', None):
+            args.response_observer(attempt, payload, response, None)
+        if response.status_code in (429, 500, 502, 503, 504) and attempt < attempts:
+            time.sleep(1)
+            continue
+        break
+    if 300 <= response.status_code < 400:
+        raise requests.HTTPError('Unexpected redirect; credentials not forwarded', response=response)
 
     end_time = time.time()
     print(f"Time taken to query model: {end_time - start_time:.2f} seconds")
@@ -292,6 +303,13 @@ def query_model(args: "LaunchArgs | ModelQueryArgs", prompt: list[dict]) -> str:
         out["reasoning"] = body.get("choices")[0].get("message").get("reasoning", None)
     else:
         out["reasoning"] = None
+    out["usage"] = body.get("usage", {})
+    out["response_model"] = body.get("model")
+    out["request_id"] = getattr(response, "headers", {}).get("x-request-id")
+    out["response_id"] = body.get("id")
+    out["finish_reason"] = (body.get("choices") or [{}])[0].get("finish_reason")
+    out["attempts"] = attempt
+    out["request_parameters"] = {k:v for k,v in payload.items() if k != "messages"}
     out["prompt_sent_at"] = prompt_sent_at
     out["code_received_at"] = _iso_now()
     return out  # type: ignore[return-value]

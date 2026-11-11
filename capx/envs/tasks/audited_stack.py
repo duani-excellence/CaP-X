@@ -59,7 +59,15 @@ class AuditedStackEnv(CodeExecutionEnvBase):
             from capx.integrations.base_api import get_api
             self._apis = {n:get_api(n)(self.low_level_env) for n in self.cfg.apis}
             self._needs_rebuild = False
-        _, info = self.low_level_env.reset(seed=seed, options=options)
+        snapshot = (options or {}).get('snapshot')
+        if snapshot is not None:
+            if seed is not None and seed != snapshot['seed']:
+                raise ValueError('Snapshot seed mismatch')
+            _, info = self.low_level_env.restore_snapshot(snapshot)
+            if info['initial_state_hash'] != snapshot['state_hash']:
+                raise ValueError('Restored physical hash mismatch')
+        else:
+            _, info = self.low_level_env.reset(seed=seed, options=options)
         for api in self._apis.values():
             if hasattr(api, 'cfg'):
                 api.cfg = None
