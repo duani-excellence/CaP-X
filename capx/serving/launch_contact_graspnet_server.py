@@ -1,3 +1,4 @@
+import random
 import asyncio
 import base64
 import contextlib
@@ -45,7 +46,27 @@ async def _run_on_gpu(fn, *args, **kwargs):
     """Run a blocking GPU function without blocking the event loop."""
     async with _GPU_SEMAPHORE:
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, functools.partial(fn, *args, **kwargs))
+        return await loop.run_in_executor(None, functools.partial(_seeded_call, fn, *args, **kwargs))
+
+
+def _seeded_call(fn, *args, **kwargs):
+    seed = getattr(args[0], 'seed', None) if args else None
+    if seed is None:
+        return fn(*args, **kwargs)
+    py_state, np_state = random.getstate(), np.random.get_state()
+    devices = list(range(torch.cuda.device_count())) if torch.cuda.is_available() else []
+    try:
+        with torch.random.fork_rng(devices=devices):
+            random.seed(seed)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            result = fn(*args, **kwargs)
+            if isinstance(result, PlanResponse):
+                result.seed = seed
+            return result
+    finally:
+        random.setstate(py_state)
+        np.random.set_state(np_state)
 
 
 def recursive_key_value_assign(d, ks, v):
@@ -114,6 +135,7 @@ def _base64_to_numpy(b64_str: str) -> np.ndarray:
 
 
 class PlanRequest(BaseModel):
+    seed: int | None = None
     depth_base64: str
     cam_K_base64: str
     segmap_base64: str
@@ -127,6 +149,7 @@ class PlanRequest(BaseModel):
 
 
 class PlanPointCloudsRequest(BaseModel):
+    seed: int | None = None
     pc_full_base64: str
     pc_segment_base64: str
     segmap_id: int = 1
@@ -142,6 +165,7 @@ class PlanEvenlyRequest(PlanRequest):
 
 
 class PlanResponse(BaseModel):
+    seed: int | None = None
     grasps_base64: str
     scores_base64: str
     contact_pts_base64: str

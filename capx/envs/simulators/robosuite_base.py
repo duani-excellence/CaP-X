@@ -65,6 +65,8 @@ class RobosuiteBaseEnv(BaseEnv):
         # Video capture
         self._record_frames = False
         self._frame_buffer: list[np.ndarray] = []
+        self._frame_timestamps: list[float] = []
+        self._wrist_frame_timestamps: list[float] = []
         self._wrist_frame_buffer: list[np.ndarray] = []
         self._record_wrist_camera = False
         self._wrist_camera_name = "robot0_eye_in_hand"
@@ -192,6 +194,9 @@ class RobosuiteBaseEnv(BaseEnv):
             self.robosuite_env.step(sliced)
         else:
             self.robosuite_env.step(sliced, skip_render_images=True)
+
+        if hasattr(self, "_physics_observer"):
+            self._physics_observer()
 
     def _step_once(self) -> None:
         """Execute one simulation step with current control state."""
@@ -382,7 +387,9 @@ class RobosuiteBaseEnv(BaseEnv):
         self._record_wrist_camera = wrist_camera
         if clear:
             self._frame_buffer.clear()
+            self._frame_timestamps.clear()
             self._wrist_frame_buffer.clear()
+            self._wrist_frame_timestamps.clear()
         if enabled:
             self._record_frame()
 
@@ -390,6 +397,7 @@ class RobosuiteBaseEnv(BaseEnv):
         frames = [frame.copy() for frame in self._frame_buffer]
         if clear:
             self._frame_buffer.clear()
+            self._frame_timestamps.clear()
         return frames
 
     def get_video_frame_count(self) -> int:
@@ -402,6 +410,7 @@ class RobosuiteBaseEnv(BaseEnv):
         frames = [frame.copy() for frame in self._wrist_frame_buffer]
         if clear:
             self._wrist_frame_buffer.clear()
+            self._wrist_frame_timestamps.clear()
         return frames
 
     def get_wrist_video_frames_range(self, start: int, end: int) -> list[np.ndarray]:
@@ -417,6 +426,7 @@ class RobosuiteBaseEnv(BaseEnv):
             height=self._render_height,
             depth=False,
         )
+        self._frame_timestamps.append(float(self.robosuite_env.sim.data.time))
         self._frame_buffer.append(frame[::-1])  # Flip vertically
 
         if self._record_wrist_camera:
@@ -426,6 +436,7 @@ class RobosuiteBaseEnv(BaseEnv):
                 height=self._render_height,
                 depth=False,
             )
+            self._wrist_frame_timestamps.append(float(self.robosuite_env.sim.data.time))
             self._wrist_frame_buffer.append(wrist_frame[::-1])
 
     def render(self, mode: str = "rgb_array") -> np.ndarray:  # type: ignore[override]

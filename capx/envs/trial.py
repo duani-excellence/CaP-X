@@ -140,6 +140,7 @@ def _save_trial_video(
     """Save recorded video frames from the environment, if available."""
     if not config["record_video"] or not hasattr(env, "get_video_frames"):
         return
+    timestamps = list(getattr(env.low_level_env, "_frame_timestamps", [])) or None
     frames = env.get_video_frames(clear=True)
     if not frames or not config["output_dir"]:
         return
@@ -150,7 +151,7 @@ def _save_trial_video(
         suffix += f"_{suffix_extra}"
 
     if isinstance(frames, list):
-        _write_video(frames, base_dir, suffix=suffix)
+        _write_video(frames, base_dir, suffix=suffix, timestamps=timestamps)
     elif isinstance(frames, dict):
         for key, frame in frames.items():
             _write_video(frame, base_dir, suffix=f"{suffix}_{key}")
@@ -176,6 +177,8 @@ def _save_turn_and_combined_videos(
     if not hasattr(env, "get_video_frames"):
         return
 
+    timestamps = list(getattr(env.low_level_env, "_frame_timestamps", [])) or None
+    wrist_timestamps = list(getattr(env.low_level_env, "_wrist_frame_timestamps", [])) or None
     all_frames = env.get_video_frames(clear=True)
     if not all_frames:
         return
@@ -195,10 +198,10 @@ def _save_turn_and_combined_videos(
     for i, (start, end) in enumerate(turn_frame_ranges):
         turn_frames = all_frames[start:end]
         if turn_frames:
-            _write_video(turn_frames, base_dir, suffix=f"turn_{i:02d}")
+            _write_video(turn_frames, base_dir, suffix=f"turn_{i:02d}", timestamps=timestamps[start:end] if timestamps else None)
 
     # Combined video
-    _write_video(all_frames, base_dir, suffix="combined")
+    _write_video(all_frames, base_dir, suffix="combined", timestamps=timestamps)
 
     # Wrist camera videos
     if config.get("use_wrist_camera") and hasattr(env, "get_wrist_video_frames"):
@@ -207,8 +210,8 @@ def _save_turn_and_combined_videos(
             for i, (start, end) in enumerate(turn_frame_ranges):
                 wrist_turn = wrist_frames[start:end]
                 if wrist_turn:
-                    _write_video(wrist_turn, base_dir, suffix=f"turn_{i:02d}_wrist")
-            _write_video(wrist_frames, base_dir, suffix="combined_wrist")
+                    _write_video(wrist_turn, base_dir, suffix=f"turn_{i:02d}_wrist", timestamps=wrist_timestamps[start:end] if wrist_timestamps else None)
+            _write_video(wrist_frames, base_dir, suffix="combined_wrist", timestamps=wrist_timestamps)
 
 
 # ---------------------------------------------------------------------------

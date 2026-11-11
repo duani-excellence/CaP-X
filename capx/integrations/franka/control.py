@@ -1,3 +1,4 @@
+from capx.integrations.franka.geometry import select_grasp, GRASP_TO_TCP_METERS
 import pathlib
 import time
 from typing import Any
@@ -144,7 +145,7 @@ class FrankaControlApi(ApiBase):
 
         Args:
             object_name: The name of the object to get the pose of.
-            return_bbox_extent:  Whether to return the extent of the oriented bounding box (oriented by quaternion_wxyz). Default is False.
+            return_bbox_extent:  Whether to return the axis-aligned extent in the robot base frame. Default is False.
 
         Returns:
             position: (3,) XYZ in meters.
@@ -167,7 +168,7 @@ class FrankaControlApi(ApiBase):
         # save depth image with colormap
         depth_img = depth_to_rgb(depth[:, :, 0])
         depth_img_out = Image.fromarray(depth_img)
-        depth_img_out.save("depth_image.jpg")
+        # Depth remains in the observation; no shared root-directory artifact.
 
         binary_map_nan_is_zero = (~np.isnan(depth[:, :, 0])).astype(int)
 
@@ -272,7 +273,8 @@ class FrankaControlApi(ApiBase):
         print(f"Object quaternion wxyz for {object_name}: {obb_tf_world.wxyz_xyz[:4]}")
         if return_bbox_extent:
             print(f"Object extent for {object_name}: {obb.extent}")
-            return obb_tf_world.wxyz_xyz[-3:], obb_tf_world.wxyz_xyz[:4], obb.extent
+            base_extent = np.abs(obb_tf_world.rotation().as_matrix()) @ obb.extent
+            return obb_tf_world.wxyz_xyz[-3:], obb_tf_world.wxyz_xyz[:4], base_extent
         else:
             return obb_tf_world.wxyz_xyz[-3:], obb_tf_world.wxyz_xyz[:4], None
 
@@ -303,7 +305,7 @@ class FrankaControlApi(ApiBase):
         # save depth image with colormap
         depth_img = depth_to_rgb(depth[:, :, 0])
         depth_img_out = Image.fromarray(depth_img)
-        depth_img_out.save("depth_image.jpg")
+        # Depth remains in the observation; no shared root-directory artifact.
 
         binary_map_nan_is_zero = (~np.isnan(depth[:, :, 0])).astype(int)
 
@@ -386,12 +388,12 @@ class FrankaControlApi(ApiBase):
                 obs["robot0_robotview"]["intrinsics"],
                 segmentation[:, :, 0],
                 queried_instance_idx,
+                seed=self._env.next_grasp_seed(),
                 # local_regions=False,
             )
         )
-        self._env.grasp_sample_tf = vtf.SE3.from_matrix(
-            self._env.grasp_sample[self._env.grasp_scores.argmax()]
-        ) @ vtf.SE3.from_translation(np.array([0, 0, 0.12]))
+        selected, selected_index, selected_score = select_grasp(self._env.grasp_sample, self._env.grasp_scores)
+        self._env.grasp_sample_tf = vtf.SE3.from_matrix(selected) @ vtf.SE3.from_translation(GRASP_TO_TCP_METERS)
 
         cam_extr_tf = vtf.SE3.from_rotation_and_translation(
             rotation=vtf.SO3(wxyz=obs["robot0_robotview"]["pose"][3:]),
@@ -445,7 +447,7 @@ class FrankaControlApi(ApiBase):
         if (
             z_approach != 0.0
         ):  # If z_approach is not 0.0, approach the object from above by z_approach meters
-            z_offset_pos = offset_pos + rot.apply(np.array([0, 0, -z_approach]))
+            z_offset_pos = offset_pos + np.array([0, 0, z_approach])
 
             if self.cfg is None or self.real:
                 self.cfg = self.ik_solve_fn(

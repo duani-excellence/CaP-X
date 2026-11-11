@@ -1,3 +1,8 @@
+from capx.utils.request_audit import audited_post
+
+class RobotAPIConnectionError(ConnectionError):
+    """Infrastructure failure, excluded from training negatives."""
+
 import time
 
 import requests
@@ -29,7 +34,7 @@ def post_with_retries(
     attempts = 0
     while time.time() < deadline and attempts < max_retries:
         try:
-            resp = requests.post(url, json=payload, timeout=timeout_seconds)
+            resp = audited_post(url, json=payload, timeout=max(.001, deadline-time.time()))
             resp.raise_for_status()
             return resp.json()
         except requests.RequestException as e:
@@ -38,7 +43,7 @@ def post_with_retries(
             time.sleep(min(current_interval, max(0, deadline - time.time())))
             current_interval = min(current_interval * 2, 8.0)
 
-    raise RuntimeError(
+    raise RobotAPIConnectionError(
         f"Request to {url} failed after {attempts} retries / "
         f"{timeout_seconds:.2f}s. Last error: {last_err}"
     )
@@ -74,7 +79,7 @@ def post_with_queue_tolerance(
     attempts = 0
     while time.time() < deadline and attempts < max_retries:
         try:
-            resp = requests.post(url, json=payload, timeout=timeout_seconds)
+            resp = audited_post(url, json=payload, timeout=max(.001, deadline-time.time()))
             if resp.status_code == 503:
                 # Server is busy / model not ready -- treat as transient
                 last_err = requests.HTTPError(
@@ -92,7 +97,7 @@ def post_with_queue_tolerance(
             time.sleep(min(current_interval, max(0, deadline - time.time())))
             current_interval = min(current_interval * 2, 8.0)
 
-    raise RuntimeError(
+    raise RobotAPIConnectionError(
         f"Request to {url} failed after {attempts} retries / "
         f"{timeout_seconds:.2f}s. Last error: {last_err}"
     )

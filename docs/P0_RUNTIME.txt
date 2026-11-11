@@ -1,0 +1,102 @@
+CaP-X P0 Stack runtime (2026-11-11)
+
+Scope: simulated Robosuite Stack only. No real-robot execution, training, model
+installation or dependency upgrade is part of this patch.
+
+Entry points:
+  franka_robosuite_pick_place_code_env: explicit privileged Teacher/Oracle mode.
+  franka_pick_place_code_env: compatibility alias for the same Teacher mode.
+  franka_robosuite_pick_place_vision_code_env: deployment-observation Student mode.
+Do not use privileged data sources for Student training. The Student constructor
+rejects privileged API bindings. Legacy non-Stack tasks are NOT P0-audited.
+
+Run from repository root with the existing .venv. Linux bubblewrap, user/mount/
+PID/network namespaces, Python 3.12 and the existing NumPy are required. The
+broker must run on a dedicated worker's main thread. A threaded web runner is
+not certified; callback execution fails closed outside the main thread.
+
+Core tests (no model inference):
+  PYTHONPATH=$PWD MUJOCO_GL=egl PYTHONDONTWRITEBYTECODE=1 \
+  OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  CAPX_TEST_OUTPUT=/absolute/new/acceptance-directory \
+  .venv/bin/python -B -m pytest -p no:cacheprovider tests/p0 -q
+The two visual tests skip unless CAPX_P0_VISION=1. Oracle acceptance uses the
+existing local IK service at 8116. Visual tests additionally use SAM3 at 8114
+and the P0 GraspNet service at 8215. They never invoke an LLM.
+
+P0 GraspNet launch, reusing existing weights (run in a separate terminal):
+  PYTHONPATH=$PWD PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=1 \
+  OMP_NUM_THREADS=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  .venv/bin/python -B -m capx.serving.launch_contact_graspnet_server --port 8215
+For ordinary vision execution, set GRASPNET_SERVICE_URL=http://127.0.0.1:8215
+before importing the vision module. The legacy service at 8115 does not echo
+request seeds and is deliberately rejected for seeded runs.
+
+Run the full suite with CAPX_P0_VISION=1 and a NEW CAPX_TEST_OUTPUT directory.
+Do not share a GPU with uncontrolled concurrent workloads when measuring timing.
+The CUDA allocator option resolved the observed duplicate-service OOM here;
+it is not a universal GPU memory guarantee.
+
+Reward contract:
+  score = 1 only for valid execution, at least one actual motion API invocation,
+  and independent stable physical placement; otherwise score=0.
+  physical_success and task_completed are parent-owned physics results.
+  valid_for_training=false for infrastructure failures and timeouts. A numeric
+  zero alone must NEVER be consumed as a training negative for those samples.
+  Dense simulator reward is not used for terminal success.
+
+Each reset creates an exclusive UUID directory below cfg.artifact_root (default
+runs/p0). trace.jsonl contains reset snapshot, code blocks, parent-only physical
+steps, each API's arguments/return/error and before/after states, and final result.
+requests.jsonl contains actual HTTP attempts including retries, payloads and
+status/timing; authorization headers and URL query strings are not recorded.
+Model HTTP attempts, code blocks and API calls are separate counters.
+
+Units / frames:
+  positions: metres; time: simulation seconds; public quaternions: WXYZ.
+  camera optical: +X right, +Y down, +Z forward.
+  camera pose: T_robot_base_camera; pose_mat has the same convention.
+  API object/grasp/goto poses: robot-base frame.
+  MuJoCo xquat is WXYZ; Robosuite cube observation quaternions are XYZW.
+  goto_pose TCP->IK panda_hand offset: local [0,0,-0.107] m.
+  observed command TCP: T_base_hand @ Trans(0,0,+0.107).
+  physical Robosuite grip-site EE: +0.097 m from hand, distinct from command TCP.
+  Contact-GraspNet candidate->command TCP: local [0,0,+0.12] m, retained from
+  legacy code. This patch does not claim an empirical recalibration of that value.
+  z_approach: robot-base +Z, including for tilted grasps.
+  bbox extents: full axis-aligned side lengths in robot base, not OBB-local axes.
+  trace objects / EE / TCP: WORLD frame; relative_poses: object relative to EE.
+
+Physical diagnostics:
+  grasp: bilateral grasp contact + lift >0.05 m sustained >=0.5 simulated seconds.
+  slip: loss of contact while commanded closed, or falling back to initial level
+  while commanded closed; deliberate opening is not classified as slip.
+  stable placement: independent Stack success, no grasp contact, opening >0.05 m,
+  both objects' speeds <0.02 m/s and angular speeds <0.2 rad/s for >=0.5 s.
+  successful code with motions receives a 12-control-step evaluation hold.
+
+Snapshots v1 cover settled INITIAL states only. They store physics arrays,
+controller joint targets, RNG states and model/state SHA256. Restore recreates
+initial controllers from the seed and rejects model/state mismatches. Arbitrary
+mid-trajectory controller restoration and cross-hardware bitwise equivalence are
+not supported. Physics hashes use exact floats (no rounding).
+
+Video export saves frame-index -> simulation-time JSON sidecars. Playback is
+constant FPS derived from the median sample interval; sidecar sim_time is the
+accurate timing source, including the short first interval. Existing video and
+sidecar names are rejected, not silently overwritten.
+
+Actor: JSON RPC only; no pickle. Only registered robot APIs and a restricted
+NumPy/Python subset are available. No env/obs/APIS/INPUTS/globals/private attributes,
+filesystem or network APIs. OS isolation still blocks host home/network access
+when the AST guard is disabled in the dedicated regression test. Defaults:
+90 s/block, 64 API calls/block, 256/episode, 1 GiB actor address space,
+64 KiB program/stdout budget, 1 MiB RPC budget. No unsafe in-process fallback.
+Timeout kills the actor and invalidates the simulator; next reset rebuilds it.
+A native deadlock inside the trusted simulator requires an outer worker watchdog;
+this patch does not claim to kill arbitrary uninterruptible kernel/native code.
+
+Research status: ready for controlled paired diagnostic experiments on this
+Stack/main-process path. This is NOT a mass-data-collection or training GO:
+the visual Oracle still failed stable placement in the measured paired scene,
+20-scene A/B thresholds and the Ray reward path have not been accepted.

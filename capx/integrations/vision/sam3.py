@@ -12,7 +12,7 @@ import numpy as np
 import requests
 from PIL import Image
 
-from capx.utils.serve_utils import post_with_retries
+from capx.utils.serve_utils import post_with_retries, RobotAPIConnectionError
 
 """SAM 3 integration via FastAPI service."""
 
@@ -65,8 +65,7 @@ def init_sam3(
             resp = post_with_retries(f"{SERVICE_URL}/segment", payload)
             results_data = resp["results"]
         except Exception as e:
-            print(f"Failed to communicate with SAM3 service at {SERVICE_URL}: {e}")
-            return []
+            raise RobotAPIConnectionError(f"SAM3 service failure at {SERVICE_URL}: {type(e).__name__}") from e
 
         if not results_data:
             print(f"SAM3 returned no results for prompt: '{text_prompt}'")

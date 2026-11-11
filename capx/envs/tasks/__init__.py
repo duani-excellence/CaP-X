@@ -37,8 +37,9 @@ register_exec_env("franka_pick_place_code_env", FrankaPickPlaceCodeEnv)
 register_config(
     "franka_pick_place_code_env",
     CodeExecEnvConfig(
-        low_level="franka_cubes_low_level",
+        low_level="franka_robosuite_cubes_low_level",
         apis=["FrankaControlPrivilegedApi"],
+        privileged=True,
     ),
 )
 register_exec_env("franka_robosuite_pick_place_code_env", FrankaPickPlaceCodeEnv)
@@ -47,6 +48,7 @@ register_config(
     CodeExecEnvConfig(
         low_level="franka_robosuite_cubes_low_level",
         apis=["FrankaControlPrivilegedApi"],
+        privileged=True,
     ),
 )
 register_exec_env("franka_nut_assembly_code_env", FrankaNutAssemblyCodeEnv)
@@ -72,7 +74,7 @@ register_exec_env("franka_pick_place_multi_code_env", FrankaPickPlaceCodeEnv)
 register_config(
     "franka_pick_place_multi_code_env",
     CodeExecEnvConfig(
-        low_level="franka_cubes_low_level",
+        low_level="franka_robosuite_cubes_low_level",
         apis=["FrankaControlMultiPrivilegedApi"],
     ),
 )
@@ -185,3 +187,6 @@ register_config(
         apis=["R1ProControlApi"],
     ),
 )
+
+register_exec_env("franka_robosuite_pick_place_vision_code_env", FrankaPickPlaceCodeEnv)
+register_config("franka_robosuite_pick_place_vision_code_env", CodeExecEnvConfig(low_level="franka_robosuite_cubes_low_level", apis=["FrankaControlApi"], privileged=False))

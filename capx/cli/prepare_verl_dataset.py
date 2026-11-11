@@ -50,7 +50,7 @@ def _generate_rows(
     try:
         for idx in indices:
             env_seed = seed_base + idx
-            obs = env._get_observation()
+            obs, reset_info = env.reset(seed=env_seed)
             if env.oracle_code is not None:
                 ground_truth = {"program": env.oracle_code}
             else:
@@ -78,6 +78,7 @@ def _generate_rows(
                         "split": split,
                         "index": idx,
                         "seed": env_seed,
+                        "initial_state_hash": reset_info.get("initial_state_hash"),
                     },
                 }
             )

@@ -53,6 +53,8 @@ class CodeExecEnvConfig:
     privileged: bool = False
     enable_render: bool = True
     viser_debug: bool = False
+    execution_timeout: float = 90.0
+    artifact_root: str | None = None
 
 
 class SimpleExecutor:

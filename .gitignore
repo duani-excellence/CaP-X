@@ -89,3 +89,7 @@ logs/
 runs/
 *.mp4
 *.avi
+
+# Local reproduction links
+/.venv
+/models

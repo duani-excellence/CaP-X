@@ -131,7 +131,7 @@ class FrankaControlPrivilegedApi(ApiBase):
         )
 
         if z_approach != 0.0:
-            z_offset_pos = offset_pos + rot.apply(np.array([0, 0, -z_approach]))
+            z_offset_pos = offset_pos + np.array([0, 0, z_approach])
             self._solve_and_move(quat_wxyz, z_offset_pos)
 
         self._solve_and_move(quat_wxyz, offset_pos)

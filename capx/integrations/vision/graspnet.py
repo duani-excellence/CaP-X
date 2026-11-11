@@ -1,4 +1,5 @@
 from __future__ import annotations
+from capx.utils.request_audit import audited_post
 
 import base64
 import io
@@ -132,6 +133,7 @@ def init_contact_graspnet(device: str = "cuda", checkpoint_path: str | None = No
         z_range: list[float] = None,
         forward_passes: int = 2,
         max_retries: int = 10,
+        seed: int | None = None,
     ) -> tuple[np.ndarray | list, np.ndarray | list, np.ndarray | list]:
         """
         Call the GraspNet service.
@@ -144,6 +146,7 @@ def init_contact_graspnet(device: str = "cuda", checkpoint_path: str | None = No
         num_viewpoints = 40 # default to 10 viewpoints, and not passed as a parameter
 
         payload = {
+            "seed": seed,
             "depth_base64": _numpy_to_base64(depth),
             "cam_K_base64": _numpy_to_base64(cam_K),
             "segmap_base64": _numpy_to_base64(segmap),
@@ -160,14 +163,16 @@ def init_contact_graspnet(device: str = "cuda", checkpoint_path: str | None = No
 
         try:
             # start_time = time.time()
-            resp = requests.post(f"{SERVICE_URL}/plan", json=payload)
+            resp = audited_post(f"{SERVICE_URL}/plan", json=payload, timeout=60)
             resp.raise_for_status()
             data = resp.json()
             # end_time = time.time()
             # print(f"Sample grasp inference time: {end_time - start_time} seconds")
         except requests.RequestException as e:
-            raise RuntimeError(f"Failed to communicate with GraspNet service at {SERVICE_URL}: {e}")
+            raise ConnectionError(f"Failed to communicate with GraspNet service at {SERVICE_URL}: {e}")
 
+        if seed is not None and data.get("seed") != seed:
+            raise ConnectionError("Grasp service does not acknowledge request seed; use P0 server")
         grasps = _base64_to_numpy(data["grasps_base64"])
         scores = _base64_to_numpy(data["scores_base64"])
         contact_pts = _base64_to_numpy(data["contact_pts_base64"])
@@ -201,7 +206,7 @@ def init_contact_graspnet_point_clouds() -> Any:
         }
 
         try:
-            resp = requests.post(f"{SERVICE_URL}/plan_point_clouds", json=payload)
+            resp = audited_post(f"{SERVICE_URL}/plan_point_clouds", json=payload)
             resp.raise_for_status()
             data = resp.json()
         except requests.RequestException as e:

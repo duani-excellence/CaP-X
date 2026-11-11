@@ -1,4 +1,4 @@
-from capx.envs.tasks.base import CodeExecutionEnvBase
+from capx.envs.tasks.audited_stack import AuditedStackEnv
 
 PROMPT = """
 You are controlling a Franka Emika robot with the API described below.
@@ -49,7 +49,7 @@ goto_pose(post_place_pos, place_quat)
 
 
 # ---------------------------- High-level Env -----------------------------
-class FrankaPickPlaceCodeEnv(CodeExecutionEnvBase):
+class FrankaPickPlaceCodeEnv(AuditedStackEnv):
     """High-level code environment for Franka pick-and-place using SimpleExecutor."""
 
     prompt = PROMPT

@@ -1,3 +1,4 @@
+import json
 import base64
 import os
 import tempfile
@@ -35,7 +36,7 @@ def _encode_video_base64(frames: list[np.ndarray], fps: int = 30) -> str:
     return f"data:video/mp4;base64,{b64}"
 
 
-def _write_video(frames: list[np.ndarray], output_dir: str | None, *, suffix: str) -> None:
+def _write_video(frames: list[np.ndarray], output_dir: str | None, *, suffix: str, timestamps: list[float] | None = None) -> None:
     """Write video frames to MP4 file.
 
     Args:
@@ -46,7 +47,19 @@ def _write_video(frames: list[np.ndarray], output_dir: str | None, *, suffix: st
     parent = Path(output_dir)
     out_path = parent / f"video_{suffix}.mp4"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with imageio.get_writer(out_path, fps=30, format="FFMPEG", codec="libx264") as writer:
+    if out_path.exists():
+        raise FileExistsError(f'Refusing to overwrite existing video: {out_path}')
+    fps = 30.0
+    if timestamps is not None:
+        if len(timestamps) != len(frames) or (len(timestamps)>1 and not np.all(np.diff(timestamps)>0)):
+            raise ValueError('Video timestamps must align one-to-one and increase')
+        if len(timestamps)>1:
+            fps = float(1.0 / np.median(np.diff(timestamps)))
+        manifest = dict(playback='constant FPS; per-frame sim_time is authoritative', fps=fps,
+                        frames=[dict(frame=i, sim_time=float(t)) for i,t in enumerate(timestamps)])
+        with out_path.with_suffix('.timestamps.json').open('x') as f:
+            json.dump(manifest, f, indent=2)
+    with imageio.get_writer(out_path, fps=fps, format="FFMPEG", codec="libx264") as writer:
         for frame in frames:
             writer.append_data(np.ascontiguousarray(frame))
     print(f"Saved interaction video to {out_path} ({len(frames)} frames)")

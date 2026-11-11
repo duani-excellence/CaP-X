@@ -5,7 +5,9 @@ from launch/config utilities.
 """
 
 from __future__ import annotations
+from capx.utils.request_audit import audited_post
 
+import contextvars
 import concurrent.futures
 import copy
 import json
@@ -251,7 +253,7 @@ def query_model(args: "LaunchArgs | ModelQueryArgs", prompt: list[dict]) -> str:
     start_time = time.time()
 
     # keep calling until it works
-    response = requests.post(
+    response = audited_post(
         server_url, headers=headers, data=json.dumps(payload), timeout=200
     )
     retry = 1
@@ -259,7 +261,7 @@ def query_model(args: "LaunchArgs | ModelQueryArgs", prompt: list[dict]) -> str:
         sleep_time = 240 + random.uniform(-90, 90)
         print(f"Retry {retry}. Model query failed with status code {response.status_code}. Error: {response.text}. Retrying in {sleep_time} seconds...")
         time.sleep(sleep_time)
-        response = requests.post(
+        response = audited_post(
             server_url, headers=headers, data=json.dumps(payload), timeout=200
         )
         retry += 1
@@ -342,7 +344,7 @@ def query_model_streaming(
 
     start_time = time.time()
 
-    with requests.post(
+    with audited_post(
         args.server_url,
         headers=headers,
         data=json.dumps(payload),
@@ -472,7 +474,7 @@ def query_model_ensemble(
     tasks = [(m, t) for m, temps in ENSEMBLE_CONFIGS for t in temps]
     responses = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=9) as executor:
-        futures = {executor.submit(query_single, m, t): (m, t) for m, t in tasks}
+        futures = {executor.submit(contextvars.copy_context().run, query_single, m, t): (m, t) for m, t in tasks}
         for future in concurrent.futures.as_completed(futures):
             resp = future.result()
             responses.append(resp)
@@ -631,7 +633,7 @@ def query_single_model_ensemble(
     temperatures = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     responses = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=9) as executor:
-        futures = {executor.submit(query_single, t): t for t in temperatures}
+        futures = {executor.submit(contextvars.copy_context().run, query_single, t): t for t in temperatures}
         for future in concurrent.futures.as_completed(futures):
             resp = future.result()
             responses.append(resp)

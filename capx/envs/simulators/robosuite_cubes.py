@@ -18,9 +18,10 @@ from robosuite.controllers.composite.composite_controller_factory import (
 from robosuite.utils.placement_samplers import UniformRandomSampler
 
 from capx.envs.simulators.robosuite_base import RobosuiteBaseEnv
+from capx.envs.reproducibility import InitialSnapshotMixin
 
 
-class FrankaRobosuiteCubesLowLevel(RobosuiteBaseEnv):
+class FrankaRobosuiteCubesLowLevel(InitialSnapshotMixin, RobosuiteBaseEnv):
     """Robosuite Franka Stack environment with FrankaPickPlaceLowLevel-compatible interface.
 
     This wrapper provides the same control interface as FrankaPickPlaceLowLevel
@@ -119,9 +120,11 @@ class FrankaRobosuiteCubesLowLevel(RobosuiteBaseEnv):
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        if seed is not None:
-            self._rng = np.random.default_rng(seed)
-
+        self._frame_buffer.clear()
+        self._wrist_frame_buffer.clear()
+        self._frame_timestamps.clear()
+        self._wrist_frame_timestamps.clear()
+        self._seed_episode(seed)
         self.robosuite_env.reset()
         # Adjust initial orientation
         self.robosuite_env.sim.data.qpos[6] -= np.pi
@@ -135,10 +138,9 @@ class FrankaRobosuiteCubesLowLevel(RobosuiteBaseEnv):
             self.robosuite_env.sim.step()
             self._set_gripper(1.0)
 
-        robosuite_obs = self.robosuite_env._get_observations()
+        robosuite_obs = self.robosuite_env._get_observations(force_update=True)
         self._current_joints = np.array(robosuite_obs["robot0_joint_pos"], dtype=np.float64)
-        # We do this because for some reason modifying qpos does not update robot0_joint_pos
-        self._current_joints[6] -= np.pi
+        self._init_robot_links()
 
         obs = self.get_observation()
         self.gripper_link_wxyz_xyz = np.concatenate(
@@ -151,6 +153,8 @@ class FrankaRobosuiteCubesLowLevel(RobosuiteBaseEnv):
         info = {
             "task_prompt": "Place the primary cube on top of the secondary cube. Quaternions are WXYZ."
         }
+        self.initial_state_hash = self.physical_state_hash()
+        info.update(seed=self.episode_seed, initial_state_hash=self.initial_state_hash)
         return obs, info
 
     def _cube_pose_dict(self, robosuite_obs: dict[str, Any]) -> dict[str, list[float]]:
@@ -163,10 +167,10 @@ class FrankaRobosuiteCubesLowLevel(RobosuiteBaseEnv):
         )
 
         cubeA_world = vtf.SE3(
-            wxyz_xyz=np.concatenate([robosuite_obs["cubeA_quat"], robosuite_obs["cubeA_pos"]])
+            wxyz_xyz=np.concatenate([np.roll(robosuite_obs["cubeA_quat"], 1), robosuite_obs["cubeA_pos"]])
         )
         cubeB_world = vtf.SE3(
-            wxyz_xyz=np.concatenate([robosuite_obs["cubeB_quat"], robosuite_obs["cubeB_pos"]])
+            wxyz_xyz=np.concatenate([np.roll(robosuite_obs["cubeB_quat"], 1), robosuite_obs["cubeB_pos"]])
         )
 
         base_transform = vtf.SE3(wxyz_xyz=base_link_wxyz_xyz).inverse()
@@ -187,6 +191,18 @@ class FrankaRobosuiteCubesLowLevel(RobosuiteBaseEnv):
                 )
             ],
         }
+
+    def _compute_gripper_obs(self, robosuite_obs):
+        # Public proprioception uses the SAME virtual TCP as goto_pose:
+        # T_base_tcp = T_base_hand @ Trans(0,0,+.107).
+        # The Robosuite grip site is +.097 from the hand (10 mm difference).
+        super()._compute_gripper_obs(robosuite_obs)
+        sim = self.robosuite_env.sim
+        hand_id = sim.model.body_name2id("robot0_right_hand")
+        hand = vtf.SE3.from_rotation_and_translation(vtf.SO3(sim.data.xquat[hand_id]), sim.data.xpos[hand_id])
+        tcp = vtf.SE3(self.base_link_wxyz_xyz).inverse() @ hand @ vtf.SE3.from_translation(np.array([0., 0., .107]))
+        robosuite_obs["robot_cartesian_pos"] = np.concatenate([tcp.translation(), tcp.rotation().wxyz,
+            [robosuite_obs["robot0_gripper_qpos"][0] / self.gripper_metric_length]])
 
     def compute_reward(self) -> float:
         """Compute dense stacking reward."""
