@@ -8,6 +8,11 @@ if [[ -f .env.local ]]; then
   source .env.local
   set +a
 fi
+if [[ -f .env.api.local ]]; then
+  set -a
+  source .env.api.local
+  set +a
+fi
 export PYTHONPATH="$CAPX_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export MUJOCO_GL=egl
 export SAM3_CHECKPOINT_PATH="$CAPX_ROOT/models/sam3/sam3.pt"

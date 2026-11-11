@@ -93,3 +93,7 @@ runs/
 # Local reproduction links
 /.venv
 /models
+
+# Private API configuration
+.env.local
+.env.api.local

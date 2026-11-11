@@ -17,6 +17,7 @@ import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import urlsplit
 from typing import TYPE_CHECKING, Any
 
 import requests
@@ -244,6 +245,13 @@ def query_model(args: "LaunchArgs | ModelQueryArgs", prompt: list[dict]) -> str:
             "max_tokens": args.max_tokens,
             "messages": prompt,
         }
+    # Official OpenAI model IDs are account-configured, not a static model list.
+    # Omit sampling/reasoning options to avoid unsupported model-specific defaults.
+    if urlsplit(args.server_url).hostname == "api.openai.com":
+        payload.pop("max_tokens", None)
+        payload.pop("temperature", None)
+        payload.pop("reasoning_effort", None)
+        payload["max_completion_tokens"] = args.max_tokens
     headers = {"Content-Type": "application/json"}
     if args.api_key:
         headers["Authorization"] = f"Bearer {args.api_key}"
@@ -333,6 +341,13 @@ def query_model_streaming(
             "stream": True,
         }
 
+    # Official OpenAI model IDs are account-configured, not a static model list.
+    # Omit sampling/reasoning options to avoid unsupported model-specific defaults.
+    if urlsplit(args.server_url).hostname == "api.openai.com":
+        payload.pop("max_tokens", None)
+        payload.pop("temperature", None)
+        payload.pop("reasoning_effort", None)
+        payload["max_completion_tokens"] = args.max_tokens
     headers = {"Content-Type": "application/json"}
     if args.api_key:
         headers["Authorization"] = f"Bearer {args.api_key}"
