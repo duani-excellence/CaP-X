@@ -1,0 +1,91 @@
+# General
+.DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+.venv/
+venv/
+env/
+.env
+scripts/cloud/cloud.env
+.openrouterkey
+.nvinferencekeys
+.capx_skills.json
+.pytest_cache/
+.ruff_cache/
+
+scripts/nv_*
+# Build
+build/
+dist/
+node_modules/
+
+# Editors
+.idea/
+.vscode/
+checkpoints/
+libero_dataset/
+.cursor/
+
+output/
+old_output/
+outputs/
+output_debug/
+outputs**
+curobo_debug/
+=*
+core.*
+wandb/
+.webui_secret_key
+
+*.jpg
+*.png
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.ico
+*.webp
+check.md
+
+# Archives (large)
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
+# Compiled / build artifacts
+*.so
+*.o
+*.a
+*.tsbuildinfo
+.eslintcache
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Model weights / checkpoints
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.engine
+
+# Data
+data/
+datasets/
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+
+# Logs / run outputs
+logs/
+*.log
+runs/
+*.mp4
+*.avi
