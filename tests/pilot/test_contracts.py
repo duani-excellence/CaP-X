@@ -87,3 +87,16 @@ def test_failed_gate_prevents_model_trials(tmp_path,monkeypatch):
  monkeypatch.setattr(p,'check_services',lambda _: {'8116':{'ok':True}})
  monkeypatch.setattr(p,'run_trial',lambda *a:pytest.fail('Trial must not run'))
  with pytest.raises(RuntimeError,match='Gate A failed'):p.run(manifest,'models',tmp_path)
+
+def test_oracle_trial_exports_monotonic_video(tmp_path):
+ from capx.experiments.pilot import environment,run_trial,CostLedger,dump,digest
+ env=environment('privileged',tmp_path/'preparation')
+ try:
+  env.reset(seed=0);env.low_level_env.settle_initial();snap=env.low_level_env.capture_snapshot()
+ finally:env.close()
+ manifest=tmp_path/'manifest/scenes.json';dump(manifest.parent/'snapshot.json',snap)
+ entry=dict(seed=0,snapshot='snapshot.json',snapshot_digest=digest(snap),state_hash=snap['state_hash'])
+ result=run_trial(tmp_path,manifest,entry,'privileged','oracle',CostLedger())
+ assert result['status']=='success',result.get('video_error',result.get('error'))
+ assert __import__('pathlib').Path(result['video']).is_file()
+ timestamps=result['info']['frame_timestamps'];assert all(b>a for a,b in zip(timestamps,timestamps[1:]))

@@ -143,7 +143,6 @@ def run_trial(root,manifest,entry,mode,provider,ledger):
         if provider=='oracle':dump(canonical,hashes)
         elif json.loads(canonical.read_text())!=hashes:raise ValueError('Paired input hash mismatch')
         env.enable_video_capture(True,clear=True)
-        env.low_level_env._record_frame()
         if provider=='oracle':code=ORACLE_CODE
         else:
             url,model,key=provider_config(provider)
@@ -193,7 +192,9 @@ def run_trial(root,manifest,entry,mode,provider,ledger):
                 frames=env.get_video_frames()
                 if frames:_write_video(frames,str(root/'videos'),suffix=trial_id,timestamps=list(env.low_level_env._frame_timestamps))
                 result['video']=str(root/'videos'/f'video_{trial_id}.mp4') if frames else None
-            except Exception as exc:result['status']='system_error';result['video_error']=type(exc).__name__+': '+str(exc)
+            except Exception as exc:
+                result['status']='system_error';result['video_error']=type(exc).__name__+': '+str(exc)
+                np.savez_compressed(dest/'video-export-failure-frames.npz',frames=np.asarray(frames),timestamps=np.asarray(env.low_level_env._frame_timestamps))
             env.close()
         result['total_seconds']=time.monotonic()-start
         dump(dest/'result.json',result)
@@ -221,7 +222,7 @@ def run(manifest_path,phase,output_dir):
             for entry in entries:
                 r=run_trial(root,manifest,entry,mode,'oracle',ledger);results.append(r)
                 if r['status'] in FATAL:break
-        counts={m:sum(r['reward']==1 for r in results if r['mode']==m) for m in ['privileged','vision']}
+        counts={m:sum(r['reward']==1 and r['status']=='success' for r in results if r['mode']==m) for m in ['privileged','vision']}
         dump(root/'manifest'/'gates.json',dict(privileged=counts['privileged']==5,vision=counts['privileged']==5 and counts['vision']>=4 and not any(r['status'] in FATAL for r in results if r['mode']=='vision'),counts=counts,results=[{k:r[k] for k in ['trial_id','status','reward']} for r in results]))
     elif phase=='models':
         gates=json.loads((root/'manifest'/'gates.json').read_text())
