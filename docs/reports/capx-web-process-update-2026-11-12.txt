@@ -1,0 +1,54 @@
+CaP-X Web runtime update — 2026-11-12
+Project: /home/hanyu/dqb/cap-x-20261106
+
+Changes
+- Web-only Stack YAML reuses external services; api_servers is empty.
+- Web CLI defaults to 32768 completion tokens and GraspNet 8215.
+- Page loading no longer auto-starts paid inference.
+- Each Web trial uses a spawned process. Simulation and P0 broker execute on
+  its main thread; generated Python remains inside the existing bwrap actor.
+- JSON events carry progress and Viser port back to the Web process; prompt
+  injection and settings are forwarded to the worker.
+- Parent watchdog bounds initialization (180s), model generation (240s),
+  execution (min(requested,90s)), and post-execution processing (180s).
+  Waiting for user input has no deadline. Completed workers retain the final
+  Viser scene until stop/replacement; stop/replacement/shutdown terminate them.
+- Web success now mirrors physical success, valid execution, reward=1 and
+  no truncation. FINISH text does not count as success. P0 reward is unchanged.
+- Trace/request audit is stored under each new trial output. Video timestamps
+  are passed to video export. New output names include microseconds/session ID.
+
+Validation (no real model requests)
+- P0 including visual integrations and provider mocks: 68 passed.
+- Combined regression: 78 passed, 1 skipped (opt-in Web integration).
+- Final Web suite with opt-in integrations enabled: 8 passed, 0 skipped.
+- Real Web worker + fixed Oracle + seed 0 + visual services: reward 1/success.
+- Real Web worker + print(env): rejected; reward 0; success false.
+- Real Web worker + pass: reward 0; success false.
+- Real spawned workers: watchdog terminates, next worker has a new PID;
+  cancellation terminates the worker. Existing P0 tests cover actor isolation.
+- pytest logs/XML, videos, timestamp sidecars, traces, event JSON and worker
+  lifecycle logs: outputs/reproduction/web-update-20261112/
+
+Service transition
+- Confirmed old PID 184215 had only a completed session.
+- Its normal shutdown would terminate SAM3 184236 and IK 184238. Terminated
+  only old Web PID with SIGKILL to preserve these shared GPU services.
+- New Web PID: 358138. Startup log: web-server.log in the validation directory.
+- SAM3 184236 (8114), GraspNet 264142 (8215), PyRoKi 184238 (8116) preserved.
+- Live checks: Web HTML, JS, CSS, all three service schemas return HTTP 200.
+- Live defaults: deepseek-v4-pro, 32768, temperature 0.2, auto_start false.
+- No dependencies upgraded, models downloaded, training or real robot actions.
+
+Use
+Refresh http://127.0.0.1:8200/ and start manually. A manual model start is paid.
+Future launch (only when port 8200 is free):
+  source scripts/local/common.sh
+  export GRASPNET_SERVICE_URL=http://127.0.0.1:8215
+  .venv/bin/python -B scripts/local/run.py web --backend deepseek --max-tokens 32768
+
+Limits
+This accepts the Web process execution path with fixed generated code. Live
+LLM streaming/network availability and Chrome interactive controls were not
+end-to-end retested. OpenAI connectivity is still unresolved. Formal paired
+experiments continue to use the existing CLI/Snapshot/Gate entry point.

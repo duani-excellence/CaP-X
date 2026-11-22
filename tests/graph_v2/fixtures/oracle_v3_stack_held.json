@@ -1,0 +1,68 @@
+{
+  "source_kind": "frozen_real_public_RGBD_only_not_online",
+  "source_file": "outputs/reproduction/graph-complete-20261120/task-grounded-oracle-v3/stack/observations/00022.npz",
+  "source_sha256": "b7e21db11a9a8b5bca184a668d87a2df50486581be18a07f14bf93c6b6c6f55e",
+  "object": "red cube",
+  "predicted": {
+    "center": [
+      0.4217872742727738,
+      0.10994036652294968,
+      0.015979430583460526
+    ],
+    "lo": [
+      0.4017937829847673,
+      0.0899468752349432,
+      -0.004014060704545956
+    ],
+    "hi": [
+      0.4417807655607803,
+      0.12993385781095618,
+      0.03597292187146701
+    ],
+    "bottom_z": -0.004014060704545956,
+    "height_m": 0.039986982576012964,
+    "orientation_verified": true,
+    "rotation_since_close_rad": 0.003256241140385549,
+    "source": "public_pregrasp_center_and_current_robot_rigid_attachment",
+    "sources": [
+      "n000052",
+      "n000071"
+    ]
+  },
+  "visible": {
+    "center": [
+      0.41912753316284523,
+      0.0937463805246157,
+      0.0156688033955552
+    ],
+    "lo": [
+      0.4021762934231059,
+      0.08648130615849883,
+      -0.004137616784143605
+    ],
+    "hi": [
+      0.445938889668074,
+      0.12400435411707823,
+      0.03547522357525401
+    ],
+    "top_xy_bounds": [
+      [
+        0.4001057622987243,
+        0.08740388522104015
+      ],
+      [
+        0.4381493040269661,
+        0.10008887582819126
+      ]
+    ],
+    "pixels": 870,
+    "top_pixels": 197
+  },
+  "geometry": {
+    "frame": "robot_base",
+    "shape": "cube",
+    "height_m": 0.039986982576012964,
+    "orientation_verified": true
+  },
+  "private_truth_used": false
+}

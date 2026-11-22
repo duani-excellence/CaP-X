@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from capx.envs.configs.instantiate import instantiate
 from capx.utils.launch_utils import _load_config
-from capx.web.async_trial_runner import LaunchArgsCompat, run_trial_async
+from capx.web.async_trial_runner import LaunchArgsCompat
 from capx.web.models import (
     ConfigListResponse,
     InjectPromptCommand,
@@ -39,6 +39,8 @@ from capx.web.session_manager import Session, get_session_manager
 from capx.web.viser_ports import find_viser_port, invalidate_viser_port_cache, set_active_viser_port
 
 logging.basicConfig(level=logging.INFO)
+from capx.web.process_runner import run_trial_process as run_trial_async
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,6 +52,9 @@ def create_app() -> FastAPI:
         version="1.0.0",
     )
 
+    from capx.web.multitask import router as multitask_router
+    app.include_router(multitask_router)
+
     # CORS for frontend dev server
     app.add_middleware(
         CORSMiddleware,
@@ -59,6 +64,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    async def stop_workers():
+        manager = get_session_manager()
+        for row in manager.list_sessions():
+            await manager.remove_session(row["session_id"])
+
+    app.add_event_handler("shutdown", stop_workers)
+
     # ========================================================================
     # REST API Endpoints
     # ========================================================================
@@ -67,13 +79,12 @@ def create_app() -> FastAPI:
     async def get_default_config():
         """Return the default config path / model settings from launch.py.
 
-        When a config_path was provided on the CLI, ``auto_start`` is set to
-        ``True`` so the frontend can kick off the trial immediately after load.
+        Loading a page never starts a paid model request automatically.
         """
         default_path = getattr(app.state, "default_config_path", None)
         return {
             "config_path": default_path,
-            "auto_start": default_path is not None,
+            "auto_start": False,
             "server_url": getattr(
                 app.state, "default_server_url", "http://127.0.0.1:8110/chat/completions"
             ),
@@ -81,6 +92,11 @@ def create_app() -> FastAPI:
             "temperature": getattr(app.state, "default_temperature", 1.0),
             "max_tokens": getattr(app.state, "default_max_tokens", 20480),
         }
+
+    @app.get("/api/trial-options")
+    async def trial_options():
+        from capx.web.selection import MODELS, OBSERVATIONS
+        return {"models": MODELS, "observations": OBSERVATIONS}
 
     @app.get("/api/configs", response_model=ConfigListResponse)
     async def list_configs():
@@ -160,6 +176,22 @@ def create_app() -> FastAPI:
     @app.post("/api/start-trial", response_model=StartTrialResponse)
     async def start_trial(request: StartTrialRequest):
         """Start a new trial execution."""
+        selected_key = None
+        from capx.web.multitask import processes as multitask_processes
+        if any(p.poll() is None for p in multitask_processes.values()):
+            raise HTTPException(409, '多任务作业正在运行，请等待或停止')
+        if request.provider is not None or request.observation_mode is not None:
+            from capx.web.selection import resolve_selection
+            try:
+                url, model, selected_key, selected_config = resolve_selection(request.provider, request.observation_mode)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            request = request.model_copy(update={
+                "config_path": selected_config, "server_url": url, "model": model,
+                "temperature": 0.2, "max_tokens": getattr(app.state, "default_max_tokens", 32768),
+                "execution_timeout": 90, "use_visual_feedback": False,
+                "use_img_differencing": False,
+            })
         config_path = request.config_path
         max_tokens = (request.max_tokens if request.max_tokens is not None
                       else getattr(app.state, "default_max_tokens", 20480))
@@ -220,7 +252,7 @@ def create_app() -> FastAPI:
                 # Add model name and timestamp to output path
                 base_dir = config["output_dir"]
                 model_slug = request.model.replace("/", "_")
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f") + "_" + session.session_id[:8]
                 new_out_dir = f"{base_dir}/{model_slug}/{timestamp}"
                 Path(new_out_dir).mkdir(parents=True, exist_ok=True)
                 config["output_dir"] = new_out_dir
@@ -233,7 +265,7 @@ def create_app() -> FastAPI:
             session.state = SessionState.LOADING_CONFIG
 
             # Prefer request key, then launch.py default, then env.
-            api_key = (
+            api_key = selected_key or (
                 getattr(request, "api_key", None)
                 or getattr(app.state, "default_api_key", None)
                 or os.environ.get("CAPX_API_KEY")

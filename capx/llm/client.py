@@ -104,6 +104,7 @@ class ModelQueryArgs:
     max_attempts: int = 2
     request_timeout: float = 200
     response_observer: Any = None
+    deepseek_reasoning_effort: str | None = None
 
 
 def collapse_text_image_inputs(messages: list[dict]) -> list[dict]:
@@ -255,6 +256,11 @@ def query_model(args: "LaunchArgs | ModelQueryArgs", prompt: list[dict]) -> str:
         payload.pop("temperature", None)
         payload.pop("reasoning_effort", None)
         payload["max_completion_tokens"] = args.max_tokens
+    ds_effort = getattr(args, "deepseek_reasoning_effort", None)
+    if ds_effort is not None and args.model.startswith("deepseek-"):
+        if ds_effort not in ("low", "high", "max"):
+            raise ValueError("DeepSeek reasoning effort must be low, high, or max")
+        payload["reasoning_effort"] = ds_effort
     headers = {"Content-Type": "application/json"}
     if args.api_key:
         headers["Authorization"] = f"Bearer {args.api_key}"

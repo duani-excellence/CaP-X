@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -273,6 +273,9 @@ class LoadConfigResponse(BaseModel):
 
 class StartTrialRequest(BaseModel):
     """Request to start a trial."""
+
+    provider: Literal["deepseek", "openai"] | None = None
+    observation_mode: Literal["vision", "privileged"] | None = None
 
     config_path: str
     model: str = "google/gemini-3.1-pro-preview"

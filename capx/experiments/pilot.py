@@ -9,6 +9,8 @@ from pathlib import Path
 
 MODELS = {'deepseek':'deepseek-v4-pro','openai':'gpt-6-astra'}
 SEEDS = [0,21,1,2,3]
+# Shared completion budget includes reasoning tokens and final program text.
+DEFAULT_MAX_TOKENS = 32768
 
 def dump(path, value):
     from capx.envs.reproducibility import json_value
@@ -71,12 +73,15 @@ def load_scene(manifest,entry):
         raise ValueError('Manifest Snapshot integrity mismatch')
     return snapshot
 
-def prepare(manifest,root):
+def prepare(manifest,root,seeds=None):
+    seeds = list(SEEDS if seeds is None else seeds)
+    if not seeds or len(seeds) != len(set(seeds)):
+        raise ValueError("Seeds must be nonempty and unique")
     from capx.envs.physical_evaluation import physical_state
     env=environment('privileged',root/'traces'/'scene-preparation')
     rows=[]
     try:
-        for seed in SEEDS:
+        for seed in seeds:
             env.reset(seed=seed);low=env.low_level_env
             del low._physics_observer
             try:
@@ -91,8 +96,8 @@ def prepare(manifest,root):
             except Exception as exc:
                 dump(root/'manifest'/f'rejected-seed-{seed}.json',{'seed':seed,'error':type(exc).__name__+': '+str(exc)})
                 raise
-        assert len(rows)==5 and len({r['state_hash'] for r in rows})==5
-        assert len({digest(r['initial_state']['objects']) for r in rows})==5
+        assert len(rows)==len(seeds) and len({r['state_hash'] for r in rows})==len(seeds)
+        assert len({digest(r['initial_state']['objects']) for r in rows})==len(seeds)
         dump(manifest,{'version':1,'scenes':rows})
     finally:env.close()
 
@@ -115,7 +120,9 @@ def trace_analysis(path):
             moves.append({'requested_base_tcp':r['args'][0] if r['args'] else r['kwargs'].get('position'),'actual_world_tcp':r['after']['tcp'],'actual_world_ee':r['after']['ee'],'contacts':r['after']['contacts'],'relative_poses':r['after']['relative_poses'],'error':r['error']})
     return dict(max_lift_m=lift,lift_success=lift>.05,grasp_receipts=[r for r in apis if r['name'] in ('get_object_pose','sample_grasp_pose')],moves=moves,releases=[{'before':r['before'],'after':r['after']} for r in releases],notes='Requested TCP is base frame; actual FK is world. Contacts include expected table/gripper contacts, not automatically abnormal collisions.')
 
-def run_trial(root,manifest,entry,mode,provider,ledger):
+def run_trial(root,manifest,entry,mode,provider,ledger,*,max_tokens=DEFAULT_MAX_TOKENS,max_attempts=2,replay_code=None):
+    if provider == "replay" and replay_code is None:
+        raise ValueError("Replay requires explicit source code")
     from capx.envs.physical_evaluation import physical_state
     from capx.envs.tasks.franka.franka_pick_place import ORACLE_CODE
     from capx.llm.providers import provider_config
@@ -124,7 +131,7 @@ def run_trial(root,manifest,entry,mode,provider,ledger):
     import numpy as np
     trial_id=f'{provider}-{mode}-seed-{entry["seed"]}'
     dest=root/provider/mode/f'seed-{entry["seed"]}';dest.mkdir(parents=True,exist_ok=False)
-    result=dict(trial_id=trial_id,provider=provider,mode=mode,seed=entry['seed'],status='system_error',reward=None,cost_usd=0.,api_usage=None,generation_seconds=0.,execution_seconds=0.)
+    result=dict(max_completion_tokens=max_tokens,trial_id=trial_id,provider=provider,mode=mode,seed=entry['seed'],status='system_error',reward=None,cost_usd=0.,api_usage=None,generation_seconds=0.,execution_seconds=0.)
     env=None;start=time.monotonic()
     try:
         env=environment(mode,root/'traces'/trial_id)
@@ -144,10 +151,11 @@ def run_trial(root,manifest,entry,mode,provider,ledger):
         elif json.loads(canonical.read_text())!=hashes:raise ValueError('Paired input hash mismatch')
         env.enable_video_capture(True,clear=True)
         if provider=='oracle':code=ORACLE_CODE
+        elif provider=='replay':code=one_program(replay_code)
         else:
             url,model,key=provider_config(provider)
             if model!=MODELS[provider]:raise ValueError('Configured model mismatch; substitution prohibited')
-            bound=ledger.reserve(provider,input_bytes=len(json.dumps(prompt).encode()),max_tokens=4096)
+            bound=ledger.reserve(provider,input_bytes=len(json.dumps(prompt).encode()),max_tokens=max_tokens)
             def observer(attempt,payload,response,error):
                 body={}
                 if response is not None:
@@ -161,7 +169,7 @@ def run_trial(root,manifest,entry,mode,provider,ledger):
                 headers=getattr(response,'headers',{})
                 dump(dest/f'http-attempt-{attempt}.json',dict(trial_id=trial_id,provider=provider,attempt=attempt,payload=payload,http_status=getattr(response,'status_code',None),request_id=headers.get('x-request-id') or headers.get('x-ds-request-id'),response=body,error=error,accounting_charge_usd=charge,charge_is_upper_bound=it is None or ot is None))
                 if ledger.spent[provider]>=ledger.limit:raise RuntimeError('Provider cost ceiling reached')
-            args=ModelQueryArgs(model=model,server_url=url,api_key=key,max_tokens=4096,max_attempts=2,request_timeout=200,response_observer=observer)
+            args=ModelQueryArgs(model=model,server_url=url,api_key=key,max_tokens=max_tokens,max_attempts=max_attempts,request_timeout=200,response_observer=observer)
             from capx.execution.sandbox import callback_deadline
             t=time.monotonic()
             with callback_deadline(t+200):answer=query_model(args,prompt)
@@ -204,7 +212,9 @@ def run_trial(root,manifest,entry,mode,provider,ledger):
 
 FATAL={'system_error','timeout','budget_exceeded','api_error'}
 
-def run(manifest_path,phase,output_dir):
+def run(manifest_path,phase,output_dir,*,max_tokens=DEFAULT_MAX_TOKENS):
+    if type(max_tokens) is not int or max_tokens <= 0:
+        raise ValueError("max_tokens must be a positive integer")
     import os,fcntl
     os.environ['GRASPNET_SERVICE_URL']='http://127.0.0.1:8215'
     root=Path(output_dir).resolve();root.mkdir(parents=True,exist_ok=True)
@@ -220,20 +230,21 @@ def run(manifest_path,phase,output_dir):
         for mode in ['privileged','vision']:
             if mode=='vision' and not all(r['ok'] for r in services.values()):continue
             for entry in entries:
-                r=run_trial(root,manifest,entry,mode,'oracle',ledger);results.append(r)
+                r=run_trial(root,manifest,entry,mode,'oracle',ledger,max_tokens=max_tokens);results.append(r)
                 if r['status'] in FATAL:break
         counts={m:sum(r['reward']==1 and r['status']=='success' for r in results if r['mode']==m) for m in ['privileged','vision']}
         dump(root/'manifest'/'gates.json',dict(privileged=counts['privileged']==5,vision=counts['privileged']==5 and counts['vision']>=4 and not any(r['status'] in FATAL for r in results if r['mode']=='vision'),counts=counts,results=[{k:r[k] for k in ['trial_id','status','reward']} for r in results]))
     elif phase=='models':
         gates=json.loads((root/'manifest'/'gates.json').read_text())
         if not gates['privileged']:raise RuntimeError('Gate A failed; no model requests allowed')
+        dump(root/'manifest'/'model_budget.json',dict(max_completion_tokens=max_tokens,includes_reasoning=True,providers=list(MODELS),provider_cost_ceiling_usd=ledger.limit,request_timeout_seconds=200))
         stopped=set()
         for mode in ['privileged','vision']:
             if mode=='vision' and (not gates['vision'] or not all(r['ok'] for r in services.values())):continue
             for index,entry in enumerate(entries):
                 for provider in (['deepseek','openai'] if index%2==0 else ['openai','deepseek']):
                     if provider in stopped:continue
-                    r=run_trial(root,manifest,entry,mode,provider,ledger);results.append(r)
+                    r=run_trial(root,manifest,entry,mode,provider,ledger,max_tokens=max_tokens);results.append(r)
                     if r['status'] in FATAL:stopped.add(provider)
         dump(root/'manifest'/'model-cost-ledger.json',ledger.spent)
     else:raise ValueError('Unknown phase')

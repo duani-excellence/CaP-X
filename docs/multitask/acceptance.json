@@ -1,0 +1,82 @@
+{
+  "stack": {
+    "status": "ready",
+    "reason": "Privileged Oracle / Snapshot / Sandbox 实测通过",
+    "tested_seeds": [
+      21
+    ],
+    "evidence": [
+      "/home/hanyu/dqb/cap-x-20261106/outputs/reproduction/multitask-20261113/stack-v2-seed21/acceptance.json"
+    ]
+  },
+  "lift": {
+    "status": "ready",
+    "reason": "Privileged Oracle / Snapshot / Sandbox 实测通过",
+    "tested_seeds": [
+      0,
+      21
+    ],
+    "evidence": [
+      "/home/hanyu/dqb/cap-x-20261106/outputs/reproduction/multitask-20261113/lift-v2-seed0/acceptance.json",
+      "/home/hanyu/dqb/cap-x-20261106/outputs/reproduction/multitask-20261113/lift-v2-seed21/acceptance.json"
+    ]
+  },
+  "restack": {
+    "status": "ready",
+    "reason": "Privileged Oracle / Snapshot / Sandbox 实测通过",
+    "tested_seeds": [
+      0,
+      21
+    ],
+    "evidence": [
+      "/home/hanyu/dqb/cap-x-20261106/outputs/reproduction/multitask-20261113/restack-v2-seed0/acceptance.json",
+      "/home/hanyu/dqb/cap-x-20261106/outputs/reproduction/multitask-20261113/restack-v2-seed21/acceptance.json"
+    ]
+  },
+  "nut_assembly": {
+    "status": "ready",
+    "reason": "Privileged Oracle / Snapshot / Sandbox 实测通过",
+    "tested_seeds": [
+      0,
+      21
+    ],
+    "evidence": [
+      "/home/hanyu/dqb/cap-x-20261106/outputs/reproduction/multitask-20261113/nut_assembly-v2-seed0/acceptance.json",
+      "/home/hanyu/dqb/cap-x-20261106/outputs/reproduction/multitask-20261113/nut_assembly-v2-seed21/acceptance.json"
+    ]
+  },
+  "wipe": {
+    "status": "unverified",
+    "reason": "Oracle 未清除全部污渍；禁止采集",
+    "tested_seeds": [
+      0
+    ],
+    "evidence": [
+      "/home/hanyu/dqb/cap-x-20261106/outputs/reproduction/multitask-20261113/wipe-v2-seed0/acceptance.json"
+    ]
+  },
+  "handover": {
+    "status": "ready",
+    "reason": "Privileged Oracle / Snapshot / Sandbox 实测通过",
+    "tested_seeds": [
+      0,
+      21
+    ],
+    "evidence": [
+      "/home/hanyu/dqb/cap-x-20261106/outputs/reproduction/multitask-20261113/handover-v2-seed0/acceptance.json",
+      "/home/hanyu/dqb/cap-x-20261106/outputs/reproduction/multitask-20261113/handover-v2-seed21/acceptance.json"
+    ]
+  },
+  "two_arm_lift": {
+    "status": "unverified",
+    "reason": "Oracle Seed 0 未抓稳双把手；Seed 21 成功，尚未验收",
+    "tested_seeds": [
+      0,
+      21
+    ],
+    "evidence": [
+      "/home/hanyu/dqb/cap-x-20261106/outputs/reproduction/multitask-20261113/two_arm_lift-v2-seed0/acceptance.json",
+      "/home/hanyu/dqb/cap-x-20261106/outputs/reproduction/multitask-20261113/two_arm_lift-v2-seed21/acceptance.json"
+    ]
+  }
+}

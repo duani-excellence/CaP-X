@@ -1,0 +1,13 @@
+CaP-X source snapshot 2026-11-06
+Base commit: fa7ff65ebb9482e8d43229800bba4a3f4666dc47 (branch dev) + uncommitted working-tree changes
+
+capx/third_party/* were git submodules; they are included here as plain directories.
+Original sources (path  commit  url):
+  capx/third_party/LIBERO-PRO  5368540790fde9a18584d64105ec5ac16d8926bd  https://github.com/uynitsuj/LIBERO-PRO.git
+  capx/third_party/b1k  272ec5ca9936453c4a8fd335c4dfba61245e33ca  https://github.com/qingh097/b1k.git
+  capx/third_party/contact_graspnet_pytorch  da3dcfb2f53e43b186083ee4a9d1e232f73efc98  https://github.com/uynitsuj/contact_graspnet_pytorch
+  capx/third_party/curobo  d64c4b005459db10c5dd867d8b30a87d5bda9bdb  https://github.com/NVlabs/curobo.git
+  capx/third_party/libero_dependencies/robosuite  a498b087d4bc5a3981e3d27030d09bc537a537f3  https://github.com/Max-Fu/robosuite
+  capx/third_party/robosuite  97292732ed909ac3ae116579fb768607034a4dbd  https://github.com/uynitsuj/robosuite
+  capx/third_party/sam3  6fe87d64a5beb9084923d7a9e002741178635b09  https://github.com/Max-Fu/sam3.git
+  capx/third_party/verl  d5b4ca2712b3048a60745482a74425d687add0bb  https://github.com/Max-Fu/verl.git

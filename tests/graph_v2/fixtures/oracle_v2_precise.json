@@ -1,0 +1,2445 @@
+{
+  "source": "unchanged_handwritten_grounded_oracle_fixture",
+  "source_trace_sha256": "7d32d95b76d292166cb0828b304b5d905d4e48a1187ae605d9a30c960f18eb1d",
+  "geometry": {
+    "schema": "capx.private_evaluation_geometry.v1",
+    "task": "restack",
+    "table_top_world_z": 0.8,
+    "table_center_world": [
+      0.0,
+      0.0,
+      0.775
+    ],
+    "table_half_extent_xy": [
+      0.4,
+      0.4
+    ],
+    "table_geometry_source": "simulator_axis_aligned_table_collision_box_offline_only",
+    "objects": {
+      "red": {
+        "label": "red cube",
+        "object_name": "cubeA",
+        "root_body": "cubeA_main",
+        "half_size": [
+          0.02,
+          0.02,
+          0.02
+        ]
+      },
+      "green": {
+        "label": "green cube",
+        "object_name": "cubeB",
+        "root_body": "cubeB_main",
+        "half_size": [
+          0.02,
+          0.02,
+          0.02
+        ]
+      }
+    },
+    "base_world": {
+      "position": [
+        -0.56,
+        0.0,
+        0.922
+      ],
+      "quaternion_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    "tcp_offset_in_hand_m": [
+      0.0,
+      0.0,
+      0.107
+    ],
+    "quaternion_order": "wxyz",
+    "units": "m,s",
+    "visibility": "parent_only_offline_diagnostic_not_monitor_or_actor"
+  },
+  "records": [
+    {
+      "event": {
+        "kind": "feedback",
+        "layer": "L1",
+        "check": "precise_tcp_command",
+        "status": "UNCERTAIN",
+        "reason": "staging_motion",
+        "metrics": {
+          "stage": "above_target",
+          "correction": false,
+          "command_tcp": [
+            0.3294387305338237,
+            0.10614292236805561,
+            0.036972199256166766,
+            0.0011597425123030525,
+            0.9841132297966358,
+            -0.17753809909396845,
+            0.00017119181998565252
+          ],
+          "target_tcp": [
+            0.3294387305338237,
+            0.10614292236805561,
+            0.036972199256166766,
+            0.0011597425123030525,
+            0.9841132297966358,
+            -0.17753809909396845,
+            0.00017119181998565252
+          ],
+          "corrections": 0
+        },
+        "action": "continue",
+        "elapsed_seconds": 14.360580405918881,
+        "observation_file": "0027.npz"
+      },
+      "private": {
+        "kind": "feedback_evaluation",
+        "event_index": 17,
+        "state": {
+          "sim_time": 9.049999999999692,
+          "objects": {
+            "cubeA": {
+              "position": [
+                -0.0885380914580263,
+                0.10992628649427956,
+                0.8198922445797833
+              ],
+              "quaternion_wxyz": [
+                -0.523314022867398,
+                -4.686595631403722e-18,
+                3.7362439020197765e-18,
+                0.8521399142572421
+              ],
+              "speed": 1.4082485961116046e-14,
+              "angular_speed": 3.5832873698673384e-16
+            },
+            "cubeB": {
+              "position": [
+                -0.09777141800168522,
+                0.10926974864683148,
+                0.9669244064457013
+              ],
+              "quaternion_wxyz": [
+                0.8203610313491809,
+                -0.0044032570537427245,
+                -0.0017483250110070093,
+                0.5718263136046491
+              ],
+              "speed": 0.00973194533411366,
+              "angular_speed": 0.008625286261039809
+            }
+          },
+          "ee": [
+            [
+              -0.09657425632744868,
+              0.10875359403386187,
+              0.9689721717699801
+            ]
+          ],
+          "gripper_openings": [
+            0.03972513581957944
+          ],
+          "grasp": [
+            false
+          ],
+          "contacts": [
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674439
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674423
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674394
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674378
+            },
+            {
+              "geom1": "cubeB_g0",
+              "geom2": "gripper0_right_finger1_collision",
+              "distance": -0.00024792724564719014
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006671570417509507
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006089253400027887
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006662405753933537
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006080088736451917
+            },
+            {
+              "geom1": "cubeB_g0",
+              "geom2": "gripper0_right_finger2_collision",
+              "distance": -0.00024933192614552007
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006671040011232552
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006088722993750932
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006661875347656582
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006079558330174962
+            }
+          ],
+          "raw_success": false,
+          "released": false,
+          "still": true,
+          "frame": "world",
+          "canonical": {
+            "schema": "capx.private_evaluation.v1",
+            "task": "restack",
+            "sim_time": 9.049999999999692,
+            "frame": "world",
+            "quaternion_order": "wxyz",
+            "units": "m,s",
+            "table_top_world_z": 0.8,
+            "table_center_world": [
+              0.0,
+              0.0,
+              0.775
+            ],
+            "table_half_extent_xy": [
+              0.4,
+              0.4
+            ],
+            "table_geometry_source": "simulator_axis_aligned_table_collision_box_offline_only",
+            "base_world": {
+              "position": [
+                -0.56,
+                0.0,
+                0.922
+              ],
+              "quaternion_wxyz": [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "objects": {
+              "red": {
+                "label": "red cube",
+                "object_name": "cubeA",
+                "root_body": "cubeA_main",
+                "half_size": [
+                  0.02,
+                  0.02,
+                  0.02
+                ],
+                "position_world": [
+                  -0.0885380914580263,
+                  0.10992628649427956,
+                  0.8198922445797833
+                ],
+                "quaternion_wxyz": [
+                  -0.523314022867398,
+                  -4.686595631403722e-18,
+                  3.7362439020197765e-18,
+                  0.8521399142572421
+                ],
+                "rotation_world": [
+                  [
+                    -0.4522848669406803,
+                    0.891873533151674,
+                    -1.1897728052564974e-17
+                  ],
+                  [
+                    -0.891873533151674,
+                    -0.4522848669406803,
+                    1.4624826897772423e-18
+                  ],
+                  [
+                    -4.076812745445959e-18,
+                    1.1272727543467861e-17,
+                    0.9999999999999996
+                  ]
+                ],
+                "speed": 1.4082485961116046e-14,
+                "angular_speed": 3.5832873698673384e-16,
+                "contact_left_fingerpad": false,
+                "contact_right_fingerpad": false,
+                "bilateral_contact": false,
+                "contacts": [
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674439,
+                    "position": [
+                      -0.11542125945987339,
+                      0.10113451317005968,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674423,
+                    "position": [
+                      -0.09732986478224617,
+                      0.13680945449612664,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674394,
+                    "position": [
+                      -0.07974631813380642,
+                      0.08304311849243247,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674378,
+                    "position": [
+                      -0.06165492345617921,
+                      0.11871805981849942,
+                      0.7999461222898917
+                    ]
+                  }
+                ]
+              },
+              "green": {
+                "label": "green cube",
+                "object_name": "cubeB",
+                "root_body": "cubeB_main",
+                "half_size": [
+                  0.02,
+                  0.02,
+                  0.02
+                ],
+                "position_world": [
+                  -0.09777141800168522,
+                  0.10926974864683148,
+                  0.9669244064457013
+                ],
+                "quaternion_wxyz": [
+                  0.8203610313491809,
+                  -0.0044032570537427245,
+                  -0.0017483250110070093,
+                  0.5718263136046491
+                ],
+                "rotation_world": [
+                  [
+                    0.3460232208579465,
+                    -0.9381926521137463,
+                    -0.007904311916117297
+                  ],
+                  [
+                    0.9382234454114942,
+                    0.3459905567932721,
+                    0.005225044503753983
+                  ],
+                  [
+                    -0.002167281079464184,
+                    -0.009223997487861766,
+                    0.9999551093739487
+                  ]
+                ],
+                "speed": 0.00973194533411366,
+                "angular_speed": 0.008625286261039809,
+                "contact_left_fingerpad": true,
+                "contact_right_fingerpad": true,
+                "bilateral_contact": true,
+                "contacts": [
+                  {
+                    "geom1": "cubeB_g0",
+                    "geom2": "gripper0_right_finger1_collision",
+                    "distance": -0.00024792724564719014,
+                    "position": [
+                      -0.10863659578734455,
+                      0.09207588743848545,
+                      0.9598874150846731
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006671570417509507,
+                    "position": [
+                      -0.11092451199566747,
+                      0.09319097160806686,
+                      0.9806097285977529
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006089253400027887,
+                    "position": [
+                      -0.09592307102513925,
+                      0.08762733218765759,
+                      0.9806216453552307
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006662405753933537,
+                    "position": [
+                      -0.11092555107942517,
+                      0.09315390678054458,
+                      0.9646097715825315
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006080088736451917,
+                    "position": [
+                      -0.09592411010889695,
+                      0.0875902673601353,
+                      0.9646216883400093
+                    ]
+                  },
+                  {
+                    "geom1": "cubeB_g0",
+                    "geom2": "gripper0_right_finger2_collision",
+                    "distance": -0.00024933192614552007,
+                    "position": [
+                      -0.08446112665353664,
+                      0.1255283907629947,
+                      0.9598072261730292
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006671040011232552,
+                    "position": [
+                      -0.0821715576902241,
+                      0.12447226149302773,
+                      0.9645342651249131
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006088722993750932,
+                    "position": [
+                      -0.09717299866075231,
+                      0.130035900913437,
+                      0.9645223483674353
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006661875347656582,
+                    "position": [
+                      -0.08217051860646639,
+                      0.12450932632055002,
+                      0.9805342221401345
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006079558330174962,
+                    "position": [
+                      -0.09717195957699461,
+                      0.1300729657409593,
+                      0.9805223053826567
+                    ]
+                  }
+                ]
+              }
+            },
+            "tcp_world": {
+              "position": [
+                -0.09657500485437252,
+                0.10873015981346555,
+                0.9589721992561668
+              ],
+              "quaternion_wxyz": [
+                0.0011597425123030514,
+                0.984113229796635,
+                -0.17753809909396828,
+                0.00017119181998565236
+              ]
+            },
+            "ee_world": {
+              "position": [
+                -0.09657425632744868,
+                0.10875359403386187,
+                0.9689721717699801
+              ],
+              "quaternion_wxyz": [
+                0.000941112691675332,
+                0.8214115320329098,
+                0.5703347444562814,
+                -0.0006990108980842891
+              ]
+            },
+            "gripper_opening_m": 0.03972513581957944,
+            "visibility": "parent_only_offline_diagnostic_not_monitor_or_actor"
+          }
+        },
+        "phase": "holding_verified",
+        "held_object": "green cube",
+        "visibility": "parent_only_offline"
+      }
+    },
+    {
+      "event": {
+        "kind": "feedback",
+        "layer": "L1",
+        "check": "precise_tcp",
+        "status": "FAIL",
+        "reason": "tcp_residual",
+        "metrics": {
+          "stage": "above_target",
+          "correction": false,
+          "position_error_m": 0.009967866506460258,
+          "xy_error_m": 0.0031029438971936197,
+          "orientation_error_deg": 0.09891034609944704,
+          "target_tcp": [
+            0.3294387305338237,
+            0.10614292236805561,
+            0.036972199256166766,
+            0.0011597425123030525,
+            0.9841132297966358,
+            -0.17753809909396845,
+            0.00017119181998565252
+          ],
+          "actual_tcp": [
+            0.3325336568167353,
+            0.105920005045996,
+            0.02749960183721767,
+            0.001805713515798518,
+            0.9841983591640272,
+            -0.17705960790726272,
+            0.0004737776500628242
+          ]
+        },
+        "action": "continue",
+        "elapsed_seconds": 15.930124026956037,
+        "observation_file": "0030.npz"
+      },
+      "private": {
+        "kind": "feedback_evaluation",
+        "event_index": 19,
+        "state": {
+          "sim_time": 10.100000000000042,
+          "objects": {
+            "cubeA": {
+              "position": [
+                -0.0885380914580263,
+                0.10992628649427956,
+                0.8198922445797833
+              ],
+              "quaternion_wxyz": [
+                -0.523314022867398,
+                -1.900010730289414e-17,
+                2.3143434863484714e-17,
+                0.8521399142572421
+              ],
+              "speed": 1.4051289572024405e-14,
+              "angular_speed": 9.96169310659816e-16
+            },
+            "cubeB": {
+              "position": [
+                -0.22819866809858744,
+                0.10627264318313205,
+                0.957223727854114
+              ],
+              "quaternion_wxyz": [
+                0.8206654963511821,
+                -0.006026797960763293,
+                -0.0017387350872564696,
+                0.5713744810588806
+              ],
+              "speed": 0.01164494767485879,
+              "angular_speed": 0.005988153884230532
+            }
+          },
+          "ee": [
+            [
+              -0.22746927462843877,
+              0.10595722638928248,
+              0.9594995321358865
+            ]
+          ],
+          "gripper_openings": [
+            0.03972453138436048
+          ],
+          "grasp": [
+            false
+          ],
+          "contacts": [
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674439
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674407
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674202
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.0001077554202167417
+            },
+            {
+              "geom1": "cubeB_g0",
+              "geom2": "gripper0_right_finger1_collision",
+              "distance": -0.00026250831969641794
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006552688359678408
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006301994916495503
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006449610472585028
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006198917029402122
+            },
+            {
+              "geom1": "cubeB_g0",
+              "geom2": "gripper0_right_finger2_collision",
+              "distance": -0.0002510616234600706
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006556325798856984
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006305632355674079
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006453247911763604
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006202554468580699
+            }
+          ],
+          "raw_success": false,
+          "released": false,
+          "still": true,
+          "frame": "world",
+          "canonical": {
+            "schema": "capx.private_evaluation.v1",
+            "task": "restack",
+            "sim_time": 10.100000000000042,
+            "frame": "world",
+            "quaternion_order": "wxyz",
+            "units": "m,s",
+            "table_top_world_z": 0.8,
+            "table_center_world": [
+              0.0,
+              0.0,
+              0.775
+            ],
+            "table_half_extent_xy": [
+              0.4,
+              0.4
+            ],
+            "table_geometry_source": "simulator_axis_aligned_table_collision_box_offline_only",
+            "base_world": {
+              "position": [
+                -0.56,
+                0.0,
+                0.922
+              ],
+              "quaternion_wxyz": [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "objects": {
+              "red": {
+                "label": "red cube",
+                "object_name": "cubeA",
+                "root_body": "cubeA_main",
+                "half_size": [
+                  0.02,
+                  0.02,
+                  0.02
+                ],
+                "position_world": [
+                  -0.0885380914580263,
+                  0.10992628649427956,
+                  0.8198922445797833
+                ],
+                "quaternion_wxyz": [
+                  -0.523314022867398,
+                  -1.900010730289414e-17,
+                  2.3143434863484714e-17,
+                  0.8521399142572421
+                ],
+                "rotation_world": [
+                  [
+                    -0.4522848669406803,
+                    0.891873533151674,
+                    -5.660406761869278e-17
+                  ],
+                  [
+                    -0.891873533151674,
+                    -0.4522848669406803,
+                    1.955684402519634e-17
+                  ],
+                  [
+                    -8.15893161317367e-18,
+                    5.932893437555538e-17,
+                    0.9999999999999996
+                  ]
+                ],
+                "speed": 1.4051289572024405e-14,
+                "angular_speed": 9.96169310659816e-16,
+                "contact_left_fingerpad": false,
+                "contact_right_fingerpad": false,
+                "bilateral_contact": false,
+                "contacts": [
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674439,
+                    "position": [
+                      -0.11542125945987339,
+                      0.10113451317005968,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674407,
+                    "position": [
+                      -0.09732986478224617,
+                      0.13680945449612664,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674202,
+                    "position": [
+                      -0.07974631813380642,
+                      0.08304311849243247,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.0001077554202167417,
+                    "position": [
+                      -0.06165492345617921,
+                      0.11871805981849942,
+                      0.7999461222898917
+                    ]
+                  }
+                ]
+              },
+              "green": {
+                "label": "green cube",
+                "object_name": "cubeB",
+                "root_body": "cubeB_main",
+                "half_size": [
+                  0.02,
+                  0.02,
+                  0.02
+                ],
+                "position_world": [
+                  -0.22819866809858744,
+                  0.10627264318313205,
+                  0.957223727854114
+                ],
+                "quaternion_wxyz": [
+                  0.8206654963511821,
+                  -0.006026797960763293,
+                  -0.0017387350872564696,
+                  0.5713744810588806
+                ],
+                "rotation_world": [
+                  [
+                    0.34705635838998333,
+                    -0.9377936861910143,
+                    -0.009740956901368785
+                  ],
+                  [
+                    0.937835602211327,
+                    0.3469897602020709,
+                    0.007905032563396135
+                  ],
+                  [
+                    -0.004033277327742599,
+                    -0.011878907996116267,
+                    0.9999213090132737
+                  ]
+                ],
+                "speed": 0.01164494767485879,
+                "angular_speed": 0.005988153884230532,
+                "contact_left_fingerpad": true,
+                "contact_right_fingerpad": true,
+                "bilateral_contact": true,
+                "contacts": [
+                  {
+                    "geom1": "cubeB_g0",
+                    "geom2": "gripper0_right_finger1_collision",
+                    "distance": -0.00026250831969641794,
+                    "position": [
+                      -0.22622292146747194,
+                      0.08434194845543755,
+                      0.9540141727553161
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006552688359678408,
+                    "position": [
+                      -0.24180951075339874,
+                      0.09032423488230895,
+                      0.955153697251735
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006301994916495503,
+                    "position": [
+                      -0.2268083710506867,
+                      0.08475964090188673,
+                      0.9551787990195388
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006449610472585028,
+                    "position": [
+                      -0.24181241237387088,
+                      0.09038862253718319,
+                      0.9711535649425198
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006198917029402122,
+                    "position": [
+                      -0.22681127267115886,
+                      0.08482402855676095,
+                      0.9711786667103236
+                    ]
+                  },
+                  {
+                    "geom1": "cubeB_g0",
+                    "geom2": "gripper0_right_finger2_collision",
+                    "distance": -0.0002510616234600706,
+                    "position": [
+                      -0.22867672051801338,
+                      0.12762689958271145,
+                      0.9538521744755966
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006556325798856984,
+                    "position": [
+                      -0.21309345584572612,
+                      0.12171838713064721,
+                      0.9710449504526777
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006305632355674079,
+                    "position": [
+                      -0.22809459554843814,
+                      0.12728298111106945,
+                      0.9710198486848739
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006453247911763604,
+                    "position": [
+                      -0.21309055422525397,
+                      0.12165399947577299,
+                      0.955045082761893
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006202554468580699,
+                    "position": [
+                      -0.228091693927966,
+                      0.1272185934561952,
+                      0.9550199809940892
+                    ]
+                  }
+                ]
+              }
+            },
+            "tcp_world": {
+              "position": [
+                -0.22746634318326478,
+                0.105920005045996,
+                0.9494996018372177
+              ],
+              "quaternion_wxyz": [
+                0.0018057135157985168,
+                0.9841983591640265,
+                -0.1770596079072626,
+                0.00047377765006282387
+              ]
+            },
+            "ee_world": {
+              "position": [
+                -0.22746927462843877,
+                0.10595722638928248,
+                0.9594995321358865
+              ],
+              "quaternion_wxyz": [
+                0.001611843661035383,
+                0.821133383223013,
+                0.5707332843720998,
+                -0.0009418208827672832
+              ]
+            },
+            "gripper_opening_m": 0.03972453138436048,
+            "visibility": "parent_only_offline_diagnostic_not_monitor_or_actor"
+          }
+        },
+        "phase": "holding_verified",
+        "held_object": "green cube",
+        "visibility": "parent_only_offline"
+      }
+    },
+    {
+      "event": {
+        "kind": "feedback",
+        "layer": "L1",
+        "check": "precise_tcp",
+        "status": "PASS",
+        "reason": "tcp_converged",
+        "metrics": {
+          "stage": "above_target",
+          "correction": true,
+          "position_error_m": 0.002919184897057713,
+          "xy_error_m": 0.0029032602022304953,
+          "orientation_error_deg": 0.09444542498597923,
+          "target_tcp": [
+            0.3294387305338237,
+            0.10614292236805561,
+            0.036972199256166766,
+            0.0011597425123030525,
+            0.9841132297966358,
+            -0.17753809909396845,
+            0.00017119181998565252
+          ],
+          "actual_tcp": [
+            0.3265359399841586,
+            0.10619514139361373,
+            0.036667698580708744,
+            0.0007964266042077977,
+            0.9840126662607466,
+            -0.17809645188206552,
+            -0.0003035952894583792
+          ]
+        },
+        "action": "continue",
+        "elapsed_seconds": 17.49096361384727,
+        "observation_file": "0033.npz"
+      },
+      "private": {
+        "kind": "feedback_evaluation",
+        "event_index": 22,
+        "state": {
+          "sim_time": 11.150000000000393,
+          "objects": {
+            "cubeA": {
+              "position": [
+                -0.0885380914580263,
+                0.10992628649427956,
+                0.8198922445797833
+              ],
+              "quaternion_wxyz": [
+                -0.523314022867398,
+                -1.1571423755774453e-17,
+                1.1367187882742267e-17,
+                0.8521399142572421
+              ],
+              "speed": 1.4065150145485382e-14,
+              "angular_speed": 4.54463283201737e-16
+            },
+            "cubeB": {
+              "position": [
+                -0.23415826605615864,
+                0.10649436922171691,
+                0.9662642907163729
+              ],
+              "quaternion_wxyz": [
+                0.8213825622962607,
+                -0.004771609634865013,
+                -0.0019817291605940587,
+                0.570354267842939
+              ],
+              "speed": 0.0013804420561079826,
+              "angular_speed": 0.003372431640831056
+            }
+          },
+          "ee": [
+            [
+              -0.23345524836858877,
+              0.10620973388606227,
+              0.9686676840514001
+            ]
+          ],
+          "gripper_openings": [
+            0.039724610610615746
+          ],
+          "grasp": [
+            false
+          ],
+          "contacts": [
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674439
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674408
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674313
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674282
+            },
+            {
+              "geom1": "cubeB_g0",
+              "geom2": "gripper0_right_finger1_collision",
+              "distance": -0.00026457459729877734
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006511706936913082
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006321575750586922
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006429731079008657
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006239599892682497
+            },
+            {
+              "geom1": "cubeB_g0",
+              "geom2": "gripper0_right_finger2_collision",
+              "distance": -0.0002554731687010753
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006514618806309347
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006324487619983187
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006432642948404921
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006242511762078761
+            }
+          ],
+          "raw_success": false,
+          "released": false,
+          "still": true,
+          "frame": "world",
+          "canonical": {
+            "schema": "capx.private_evaluation.v1",
+            "task": "restack",
+            "sim_time": 11.150000000000393,
+            "frame": "world",
+            "quaternion_order": "wxyz",
+            "units": "m,s",
+            "table_top_world_z": 0.8,
+            "table_center_world": [
+              0.0,
+              0.0,
+              0.775
+            ],
+            "table_half_extent_xy": [
+              0.4,
+              0.4
+            ],
+            "table_geometry_source": "simulator_axis_aligned_table_collision_box_offline_only",
+            "base_world": {
+              "position": [
+                -0.56,
+                0.0,
+                0.922
+              ],
+              "quaternion_wxyz": [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "objects": {
+              "red": {
+                "label": "red cube",
+                "object_name": "cubeA",
+                "root_body": "cubeA_main",
+                "half_size": [
+                  0.02,
+                  0.02,
+                  0.02
+                ],
+                "position_world": [
+                  -0.0885380914580263,
+                  0.10992628649427956,
+                  0.8198922445797833
+                ],
+                "quaternion_wxyz": [
+                  -0.523314022867398,
+                  -1.1571423755774453e-17,
+                  1.1367187882742267e-17,
+                  0.8521399142572421
+                ],
+                "rotation_world": [
+                  [
+                    -0.4522848669406803,
+                    0.891873533151674,
+                    -3.161816173337451e-17
+                  ],
+                  [
+                    -0.891873533151674,
+                    -0.4522848669406803,
+                    7.261892383616503e-18
+                  ],
+                  [
+                    -7.823726454944921e-18,
+                    3.1483845647367325e-17,
+                    0.9999999999999996
+                  ]
+                ],
+                "speed": 1.4065150145485382e-14,
+                "angular_speed": 4.54463283201737e-16,
+                "contact_left_fingerpad": false,
+                "contact_right_fingerpad": false,
+                "bilateral_contact": false,
+                "contacts": [
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674439,
+                    "position": [
+                      -0.11542125945987339,
+                      0.10113451317005968,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674408,
+                    "position": [
+                      -0.09732986478224617,
+                      0.13680945449612664,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674313,
+                    "position": [
+                      -0.07974631813380642,
+                      0.08304311849243247,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674282,
+                    "position": [
+                      -0.06165492345617921,
+                      0.11871805981849942,
+                      0.7999461222898917
+                    ]
+                  }
+                ]
+              },
+              "green": {
+                "label": "green cube",
+                "object_name": "cubeB",
+                "root_body": "cubeB_main",
+                "half_size": [
+                  0.02,
+                  0.02,
+                  0.02
+                ],
+                "position_world": [
+                  -0.23415826605615864,
+                  0.10649436922171691,
+                  0.9662642907163729
+                ],
+                "quaternion_wxyz": [
+                  0.8213825622962607,
+                  -0.004771609634865013,
+                  -0.0019817291605940587,
+                  0.570354267842939
+                ],
+                "rotation_world": [
+                  [
+                    0.3493841638057573,
+                    -0.9369391877989692,
+                    -0.008698531390863427
+                  ],
+                  [
+                    0.9369770119507947,
+                    0.3493464817896741,
+                    0.005578058527418647
+                  ],
+                  [
+                    -0.002187500288039564,
+                    -0.010099209265233153,
+                    0.9999466089820521
+                  ]
+                ],
+                "speed": 0.0013804420561079826,
+                "angular_speed": 0.003372431640831056,
+                "contact_left_fingerpad": true,
+                "contact_right_fingerpad": true,
+                "bilateral_contact": true,
+                "contacts": [
+                  {
+                    "geom1": "cubeB_g0",
+                    "geom2": "gripper0_right_finger1_collision",
+                    "distance": -0.00026457459729877734,
+                    "position": [
+                      -0.23227042086222147,
+                      0.08457905277634409,
+                      0.9631320382773791
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006511706936913082,
+                    "position": [
+                      -0.24784200672981807,
+                      0.09059448926730998,
+                      0.964303308161524
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006321575750586922,
+                    "position": [
+                      -0.23285367531551932,
+                      0.08499541569455082,
+                      0.9642982665384715
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006429731079008657,
+                    "position": [
+                      -0.24782647604088534,
+                      0.0906216777299472,
+                      0.9803032759485193
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006239599892682497,
+                    "position": [
+                      -0.23283814462658659,
+                      0.08502260415718806,
+                      0.9802982343254668
+                    ]
+                  },
+                  {
+                    "geom1": "cubeB_g0",
+                    "geom2": "gripper0_right_finger2_collision",
+                    "distance": -0.0002554731687010753,
+                    "position": [
+                      -0.23463182655663525,
+                      0.12787240940792172,
+                      0.9630708099548415
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006514618806309347,
+                    "position": [
+                      -0.2190424459633836,
+                      0.12188812486621636,
+                      0.9802319552322585
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006324487619983187,
+                    "position": [
+                      -0.23403077737768238,
+                      0.1274871984389755,
+                      0.9802369968553108
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006432642948404921,
+                    "position": [
+                      -0.21905797665231633,
+                      0.12186093640357913,
+                      0.9642319874452631
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006242511762078761,
+                    "position": [
+                      -0.2340463080666151,
+                      0.12746000997633827,
+                      0.9642370290683155
+                    ]
+                  }
+                ]
+              }
+            },
+            "tcp_world": {
+              "position": [
+                -0.23346406001584152,
+                0.10619514139361373,
+                0.9586676985807088
+              ],
+              "quaternion_wxyz": [
+                0.0007964266042077972,
+                0.984012666260746,
+                -0.1780964518820654,
+                -0.000303595289458379
+              ]
+            },
+            "ee_world": {
+              "position": [
+                -0.23345524836858877,
+                0.10620973388606227,
+                0.9686676840514001
+              ],
+              "quaternion_wxyz": [
+                0.0003484843646403954,
+                0.8217352379175006,
+                0.5698688202553565,
+                -0.0007778329404650205
+              ]
+            },
+            "gripper_opening_m": 0.039724610610615746,
+            "visibility": "parent_only_offline_diagnostic_not_monitor_or_actor"
+          }
+        },
+        "phase": "holding_verified",
+        "held_object": "green cube",
+        "visibility": "parent_only_offline"
+      }
+    },
+    {
+      "event": {
+        "kind": "feedback",
+        "layer": "L1",
+        "check": "precise_tcp_pre_descent",
+        "status": "PASS",
+        "reason": "fresh_xy_and_orientation_verified",
+        "metrics": {
+          "stage": "pre_descent",
+          "position_error_m": 0.002919184897057713,
+          "xy_error_m": 0.0029032602022304953,
+          "orientation_error_deg": 0.09444542498597923,
+          "target_tcp": [
+            0.3294387305338237,
+            0.10614292236805561,
+            0.036972199256166766,
+            0.0011597425123030525,
+            0.9841132297966358,
+            -0.17753809909396845,
+            0.00017119181998565252
+          ],
+          "actual_tcp": [
+            0.3265359399841586,
+            0.10619514139361373,
+            0.036667698580708744,
+            0.0007964266042077977,
+            0.9840126662607466,
+            -0.17809645188206552,
+            -0.0003035952894583792
+          ]
+        },
+        "action": "continue",
+        "elapsed_seconds": 17.637362126028165,
+        "observation_file": "0034.npz"
+      },
+      "private": {
+        "kind": "feedback_evaluation",
+        "event_index": 23,
+        "state": {
+          "sim_time": 11.150000000000393,
+          "objects": {
+            "cubeA": {
+              "position": [
+                -0.0885380914580263,
+                0.10992628649427956,
+                0.8198922445797833
+              ],
+              "quaternion_wxyz": [
+                -0.523314022867398,
+                -1.1571423755774453e-17,
+                1.1367187882742267e-17,
+                0.8521399142572421
+              ],
+              "speed": 1.4065150145485382e-14,
+              "angular_speed": 4.54463283201737e-16
+            },
+            "cubeB": {
+              "position": [
+                -0.23415826605615864,
+                0.10649436922171691,
+                0.9662642907163729
+              ],
+              "quaternion_wxyz": [
+                0.8213825622962607,
+                -0.004771609634865013,
+                -0.0019817291605940587,
+                0.570354267842939
+              ],
+              "speed": 0.0013804420561079826,
+              "angular_speed": 0.003372431640831056
+            }
+          },
+          "ee": [
+            [
+              -0.23345524836858877,
+              0.10620973388606227,
+              0.9686676840514001
+            ]
+          ],
+          "gripper_openings": [
+            0.039724610610615746
+          ],
+          "grasp": [
+            false
+          ],
+          "contacts": [
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674439
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674408
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674313
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674282
+            },
+            {
+              "geom1": "cubeB_g0",
+              "geom2": "gripper0_right_finger1_collision",
+              "distance": -0.00026457459729877734
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006511706936913082
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006321575750586922
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006429731079008657
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006239599892682497
+            },
+            {
+              "geom1": "cubeB_g0",
+              "geom2": "gripper0_right_finger2_collision",
+              "distance": -0.0002554731687010753
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006514618806309347
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006324487619983187
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006432642948404921
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006242511762078761
+            }
+          ],
+          "raw_success": false,
+          "released": false,
+          "still": true,
+          "frame": "world",
+          "canonical": {
+            "schema": "capx.private_evaluation.v1",
+            "task": "restack",
+            "sim_time": 11.150000000000393,
+            "frame": "world",
+            "quaternion_order": "wxyz",
+            "units": "m,s",
+            "table_top_world_z": 0.8,
+            "table_center_world": [
+              0.0,
+              0.0,
+              0.775
+            ],
+            "table_half_extent_xy": [
+              0.4,
+              0.4
+            ],
+            "table_geometry_source": "simulator_axis_aligned_table_collision_box_offline_only",
+            "base_world": {
+              "position": [
+                -0.56,
+                0.0,
+                0.922
+              ],
+              "quaternion_wxyz": [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "objects": {
+              "red": {
+                "label": "red cube",
+                "object_name": "cubeA",
+                "root_body": "cubeA_main",
+                "half_size": [
+                  0.02,
+                  0.02,
+                  0.02
+                ],
+                "position_world": [
+                  -0.0885380914580263,
+                  0.10992628649427956,
+                  0.8198922445797833
+                ],
+                "quaternion_wxyz": [
+                  -0.523314022867398,
+                  -1.1571423755774453e-17,
+                  1.1367187882742267e-17,
+                  0.8521399142572421
+                ],
+                "rotation_world": [
+                  [
+                    -0.4522848669406803,
+                    0.891873533151674,
+                    -3.161816173337451e-17
+                  ],
+                  [
+                    -0.891873533151674,
+                    -0.4522848669406803,
+                    7.261892383616503e-18
+                  ],
+                  [
+                    -7.823726454944921e-18,
+                    3.1483845647367325e-17,
+                    0.9999999999999996
+                  ]
+                ],
+                "speed": 1.4065150145485382e-14,
+                "angular_speed": 4.54463283201737e-16,
+                "contact_left_fingerpad": false,
+                "contact_right_fingerpad": false,
+                "bilateral_contact": false,
+                "contacts": [
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674439,
+                    "position": [
+                      -0.11542125945987339,
+                      0.10113451317005968,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674408,
+                    "position": [
+                      -0.09732986478224617,
+                      0.13680945449612664,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674313,
+                    "position": [
+                      -0.07974631813380642,
+                      0.08304311849243247,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674282,
+                    "position": [
+                      -0.06165492345617921,
+                      0.11871805981849942,
+                      0.7999461222898917
+                    ]
+                  }
+                ]
+              },
+              "green": {
+                "label": "green cube",
+                "object_name": "cubeB",
+                "root_body": "cubeB_main",
+                "half_size": [
+                  0.02,
+                  0.02,
+                  0.02
+                ],
+                "position_world": [
+                  -0.23415826605615864,
+                  0.10649436922171691,
+                  0.9662642907163729
+                ],
+                "quaternion_wxyz": [
+                  0.8213825622962607,
+                  -0.004771609634865013,
+                  -0.0019817291605940587,
+                  0.570354267842939
+                ],
+                "rotation_world": [
+                  [
+                    0.3493841638057573,
+                    -0.9369391877989692,
+                    -0.008698531390863427
+                  ],
+                  [
+                    0.9369770119507947,
+                    0.3493464817896741,
+                    0.005578058527418647
+                  ],
+                  [
+                    -0.002187500288039564,
+                    -0.010099209265233153,
+                    0.9999466089820521
+                  ]
+                ],
+                "speed": 0.0013804420561079826,
+                "angular_speed": 0.003372431640831056,
+                "contact_left_fingerpad": true,
+                "contact_right_fingerpad": true,
+                "bilateral_contact": true,
+                "contacts": [
+                  {
+                    "geom1": "cubeB_g0",
+                    "geom2": "gripper0_right_finger1_collision",
+                    "distance": -0.00026457459729877734,
+                    "position": [
+                      -0.23227042086222147,
+                      0.08457905277634409,
+                      0.9631320382773791
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006511706936913082,
+                    "position": [
+                      -0.24784200672981807,
+                      0.09059448926730998,
+                      0.964303308161524
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006321575750586922,
+                    "position": [
+                      -0.23285367531551932,
+                      0.08499541569455082,
+                      0.9642982665384715
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006429731079008657,
+                    "position": [
+                      -0.24782647604088534,
+                      0.0906216777299472,
+                      0.9803032759485193
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006239599892682497,
+                    "position": [
+                      -0.23283814462658659,
+                      0.08502260415718806,
+                      0.9802982343254668
+                    ]
+                  },
+                  {
+                    "geom1": "cubeB_g0",
+                    "geom2": "gripper0_right_finger2_collision",
+                    "distance": -0.0002554731687010753,
+                    "position": [
+                      -0.23463182655663525,
+                      0.12787240940792172,
+                      0.9630708099548415
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006514618806309347,
+                    "position": [
+                      -0.2190424459633836,
+                      0.12188812486621636,
+                      0.9802319552322585
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006324487619983187,
+                    "position": [
+                      -0.23403077737768238,
+                      0.1274871984389755,
+                      0.9802369968553108
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006432642948404921,
+                    "position": [
+                      -0.21905797665231633,
+                      0.12186093640357913,
+                      0.9642319874452631
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006242511762078761,
+                    "position": [
+                      -0.2340463080666151,
+                      0.12746000997633827,
+                      0.9642370290683155
+                    ]
+                  }
+                ]
+              }
+            },
+            "tcp_world": {
+              "position": [
+                -0.23346406001584152,
+                0.10619514139361373,
+                0.9586676985807088
+              ],
+              "quaternion_wxyz": [
+                0.0007964266042077972,
+                0.984012666260746,
+                -0.1780964518820654,
+                -0.000303595289458379
+              ]
+            },
+            "ee_world": {
+              "position": [
+                -0.23345524836858877,
+                0.10620973388606227,
+                0.9686676840514001
+              ],
+              "quaternion_wxyz": [
+                0.0003484843646403954,
+                0.8217352379175006,
+                0.5698688202553565,
+                -0.0007778329404650205
+              ]
+            },
+            "gripper_opening_m": 0.039724610610615746,
+            "visibility": "parent_only_offline_diagnostic_not_monitor_or_actor"
+          }
+        },
+        "phase": "holding_verified",
+        "held_object": "green cube",
+        "visibility": "parent_only_offline"
+      }
+    },
+    {
+      "event": {
+        "kind": "feedback",
+        "layer": "L0",
+        "check": "attachment_consistency",
+        "status": "PASS",
+        "reason": "current_surface_consistent_with_attachment",
+        "metrics": {
+          "status": "PASS",
+          "reason": "current_surface_consistent_with_attachment",
+          "xy_disagreement_m": 0.006546664106105866,
+          "top_disagreement_m": 0.0005970315197215553,
+          "limitation": "same-camera consistency under a rigid attachment assumption, not independent verification or a measured covariance"
+        },
+        "action": "continue",
+        "elapsed_seconds": 13.877760513918474,
+        "observation_file": "0023.npz"
+      },
+      "private": {
+        "kind": "feedback_evaluation",
+        "event_index": 15,
+        "state": {
+          "sim_time": 9.049999999999692,
+          "objects": {
+            "cubeA": {
+              "position": [
+                -0.0885380914580263,
+                0.10992628649427956,
+                0.8198922445797833
+              ],
+              "quaternion_wxyz": [
+                -0.523314022867398,
+                -4.686595631403722e-18,
+                3.7362439020197765e-18,
+                0.8521399142572421
+              ],
+              "speed": 1.4082485961116046e-14,
+              "angular_speed": 3.5832873698673384e-16
+            },
+            "cubeB": {
+              "position": [
+                -0.09777141800168522,
+                0.10926974864683148,
+                0.9669244064457013
+              ],
+              "quaternion_wxyz": [
+                0.8203610313491809,
+                -0.0044032570537427245,
+                -0.0017483250110070093,
+                0.5718263136046491
+              ],
+              "speed": 0.00973194533411366,
+              "angular_speed": 0.008625286261039809
+            }
+          },
+          "ee": [
+            [
+              -0.09657425632744868,
+              0.10875359403386187,
+              0.9689721717699801
+            ]
+          ],
+          "gripper_openings": [
+            0.03972513581957944
+          ],
+          "grasp": [
+            false
+          ],
+          "contacts": [
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674439
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674423
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674394
+            },
+            {
+              "geom1": "table_collision",
+              "geom2": "cubeA_g0",
+              "distance": -0.00010775542021674378
+            },
+            {
+              "geom1": "cubeB_g0",
+              "geom2": "gripper0_right_finger1_collision",
+              "distance": -0.00024792724564719014
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006671570417509507
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006089253400027887
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006662405753933537
+            },
+            {
+              "geom1": "gripper0_right_finger1_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006080088736451917
+            },
+            {
+              "geom1": "cubeB_g0",
+              "geom2": "gripper0_right_finger2_collision",
+              "distance": -0.00024933192614552007
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006671040011232552
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006088722993750932
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006661875347656582
+            },
+            {
+              "geom1": "gripper0_right_finger2_pad_collision",
+              "geom2": "cubeB_g0",
+              "distance": -0.0006079558330174962
+            }
+          ],
+          "raw_success": false,
+          "released": false,
+          "still": true,
+          "frame": "world",
+          "canonical": {
+            "schema": "capx.private_evaluation.v1",
+            "task": "restack",
+            "sim_time": 9.049999999999692,
+            "frame": "world",
+            "quaternion_order": "wxyz",
+            "units": "m,s",
+            "table_top_world_z": 0.8,
+            "table_center_world": [
+              0.0,
+              0.0,
+              0.775
+            ],
+            "table_half_extent_xy": [
+              0.4,
+              0.4
+            ],
+            "table_geometry_source": "simulator_axis_aligned_table_collision_box_offline_only",
+            "base_world": {
+              "position": [
+                -0.56,
+                0.0,
+                0.922
+              ],
+              "quaternion_wxyz": [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "objects": {
+              "red": {
+                "label": "red cube",
+                "object_name": "cubeA",
+                "root_body": "cubeA_main",
+                "half_size": [
+                  0.02,
+                  0.02,
+                  0.02
+                ],
+                "position_world": [
+                  -0.0885380914580263,
+                  0.10992628649427956,
+                  0.8198922445797833
+                ],
+                "quaternion_wxyz": [
+                  -0.523314022867398,
+                  -4.686595631403722e-18,
+                  3.7362439020197765e-18,
+                  0.8521399142572421
+                ],
+                "rotation_world": [
+                  [
+                    -0.4522848669406803,
+                    0.891873533151674,
+                    -1.1897728052564974e-17
+                  ],
+                  [
+                    -0.891873533151674,
+                    -0.4522848669406803,
+                    1.4624826897772423e-18
+                  ],
+                  [
+                    -4.076812745445959e-18,
+                    1.1272727543467861e-17,
+                    0.9999999999999996
+                  ]
+                ],
+                "speed": 1.4082485961116046e-14,
+                "angular_speed": 3.5832873698673384e-16,
+                "contact_left_fingerpad": false,
+                "contact_right_fingerpad": false,
+                "bilateral_contact": false,
+                "contacts": [
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674439,
+                    "position": [
+                      -0.11542125945987339,
+                      0.10113451317005968,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674423,
+                    "position": [
+                      -0.09732986478224617,
+                      0.13680945449612664,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674394,
+                    "position": [
+                      -0.07974631813380642,
+                      0.08304311849243247,
+                      0.7999461222898917
+                    ]
+                  },
+                  {
+                    "geom1": "table_collision",
+                    "geom2": "cubeA_g0",
+                    "distance": -0.00010775542021674378,
+                    "position": [
+                      -0.06165492345617921,
+                      0.11871805981849942,
+                      0.7999461222898917
+                    ]
+                  }
+                ]
+              },
+              "green": {
+                "label": "green cube",
+                "object_name": "cubeB",
+                "root_body": "cubeB_main",
+                "half_size": [
+                  0.02,
+                  0.02,
+                  0.02
+                ],
+                "position_world": [
+                  -0.09777141800168522,
+                  0.10926974864683148,
+                  0.9669244064457013
+                ],
+                "quaternion_wxyz": [
+                  0.8203610313491809,
+                  -0.0044032570537427245,
+                  -0.0017483250110070093,
+                  0.5718263136046491
+                ],
+                "rotation_world": [
+                  [
+                    0.3460232208579465,
+                    -0.9381926521137463,
+                    -0.007904311916117297
+                  ],
+                  [
+                    0.9382234454114942,
+                    0.3459905567932721,
+                    0.005225044503753983
+                  ],
+                  [
+                    -0.002167281079464184,
+                    -0.009223997487861766,
+                    0.9999551093739487
+                  ]
+                ],
+                "speed": 0.00973194533411366,
+                "angular_speed": 0.008625286261039809,
+                "contact_left_fingerpad": true,
+                "contact_right_fingerpad": true,
+                "bilateral_contact": true,
+                "contacts": [
+                  {
+                    "geom1": "cubeB_g0",
+                    "geom2": "gripper0_right_finger1_collision",
+                    "distance": -0.00024792724564719014,
+                    "position": [
+                      -0.10863659578734455,
+                      0.09207588743848545,
+                      0.9598874150846731
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006671570417509507,
+                    "position": [
+                      -0.11092451199566747,
+                      0.09319097160806686,
+                      0.9806097285977529
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006089253400027887,
+                    "position": [
+                      -0.09592307102513925,
+                      0.08762733218765759,
+                      0.9806216453552307
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006662405753933537,
+                    "position": [
+                      -0.11092555107942517,
+                      0.09315390678054458,
+                      0.9646097715825315
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger1_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006080088736451917,
+                    "position": [
+                      -0.09592411010889695,
+                      0.0875902673601353,
+                      0.9646216883400093
+                    ]
+                  },
+                  {
+                    "geom1": "cubeB_g0",
+                    "geom2": "gripper0_right_finger2_collision",
+                    "distance": -0.00024933192614552007,
+                    "position": [
+                      -0.08446112665353664,
+                      0.1255283907629947,
+                      0.9598072261730292
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006671040011232552,
+                    "position": [
+                      -0.0821715576902241,
+                      0.12447226149302773,
+                      0.9645342651249131
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006088722993750932,
+                    "position": [
+                      -0.09717299866075231,
+                      0.130035900913437,
+                      0.9645223483674353
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006661875347656582,
+                    "position": [
+                      -0.08217051860646639,
+                      0.12450932632055002,
+                      0.9805342221401345
+                    ]
+                  },
+                  {
+                    "geom1": "gripper0_right_finger2_pad_collision",
+                    "geom2": "cubeB_g0",
+                    "distance": -0.0006079558330174962,
+                    "position": [
+                      -0.09717195957699461,
+                      0.1300729657409593,
+                      0.9805223053826567
+                    ]
+                  }
+                ]
+              }
+            },
+            "tcp_world": {
+              "position": [
+                -0.09657500485437252,
+                0.10873015981346555,
+                0.9589721992561668
+              ],
+              "quaternion_wxyz": [
+                0.0011597425123030514,
+                0.984113229796635,
+                -0.17753809909396828,
+                0.00017119181998565236
+              ]
+            },
+            "ee_world": {
+              "position": [
+                -0.09657425632744868,
+                0.10875359403386187,
+                0.9689721717699801
+              ],
+              "quaternion_wxyz": [
+                0.000941112691675332,
+                0.8214115320329098,
+                0.5703347444562814,
+                -0.0006990108980842891
+              ]
+            },
+            "gripper_opening_m": 0.03972513581957944,
+            "visibility": "parent_only_offline_diagnostic_not_monitor_or_actor"
+          }
+        },
+        "phase": "holding_verified",
+        "held_object": "green cube",
+        "visibility": "parent_only_offline"
+      }
+    }
+  ]
+}

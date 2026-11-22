@@ -1,0 +1,20 @@
+# Usage: uv run capx/envs/launch.py --config-path env_configs/cube_stack/franka_robosuite_cube_stack.yaml
+
+env:
+  _target_: capx.envs.tasks.franka.franka_pick_place.FrankaPickPlaceCodeEnv
+  cfg:
+    _target_: capx.envs.tasks.base.CodeExecEnvConfig
+    low_level: franka_robosuite_cubes_low_level
+    privileged: false
+    apis:
+      - FrankaControlApi
+    # prompt is inherited from FrankaPickPlaceCodeEnv class default
+
+# Services are maintained externally: SAM3 8114, P0 GraspNet 8215, PyRoKi 8116.
+api_servers: []
+
+record_video: true
+output_dir: ./outputs/reproduction/web
+
+trials: 1
+num_workers: 1

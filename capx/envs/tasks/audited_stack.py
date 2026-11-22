@@ -47,6 +47,9 @@ class AuditedStackEnv(CodeExecutionEnvBase):
         return obs
 
     def reset(self, *, seed=None, options=None):
+        # Monitors are episode-scoped and explicitly installed after reset.
+        if hasattr(self, '_feedback_monitor'):
+            del self._feedback_monitor
         self._actor.close()
         if self._request_audit is not None:
             self._request_audit.__exit__()
@@ -90,6 +93,16 @@ class AuditedStackEnv(CodeExecutionEnvBase):
         self._write('physics', state=state)
 
     def _call_api(self, name, args, kwargs):
+        monitor = getattr(self, '_feedback_monitor', None)
+        if monitor is not None:
+            return monitor.invoke(name, args, kwargs, self._execute_api)
+        return self._execute_api(name, args, kwargs)
+
+    def _execute_api(self, name, args, kwargs):
+        limit = getattr(self.cfg, 'feedback_api_budget', None)
+        if limit is not None and self._api_calls >= limit:
+            from capx.execution.sandbox import ExecutionInterrupted
+            raise ExecutionInterrupted('Episode API budget exhausted (including recovery)')
         before = physical_state(self.low_level_env)
         self._api_calls += 1
         if name in ('goto_pose','open_gripper','close_gripper','home_pose'):

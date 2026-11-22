@@ -86,6 +86,10 @@ def _limits():
     resource.setrlimit(resource.RLIMIT_CPU, (600, 600))
 
 
+class ExecutionInterrupted(Exception):
+    """Parent monitor stopped this block; physical environment remains resumable."""
+
+
 class SandboxProcess:
     def __init__(self, apis, *, callback=None):
         self.apis = dict(apis)
@@ -93,6 +97,7 @@ class SandboxProcess:
         self.process = None
         self.buffer = b''
         self.calls = 0
+        self.call_site = None
 
     @property
     def pid(self):
@@ -144,6 +149,8 @@ class SandboxProcess:
         return json.loads(line)
 
     def run(self, code, *, timeout=90.0):
+        self.call_site = None
+        source_lines = code.splitlines()
         out = {'ok': False, 'stdout': '', 'stderr': '', 'status': 'runtime_error', 'api_calls': 0}
         try:
             validate(code)
@@ -169,16 +176,24 @@ class SandboxProcess:
                 if calls > 64 or self.calls > 256:
                     raise ValueError('API call budget exceeded')
                 name = message['name']
+                # Provenance is not authority: API allowlist and budgets were checked above.
+                line = message.get('site_line')
+                self.call_site = ({'line': line, 'source_line': source_lines[line - 1]}
+                                  if type(line) is int and 1 <= line <= len(source_lines)
+                                  else None)
                 try:
                     with callback_deadline(deadline):
                         result = self.callback(name, decode(message['args']), decode(message['kwargs']))
                     self._send({'ok': True, 'result': encode(result)})
-                except (TimeoutError, ConnectionError):
+                except (TimeoutError, ConnectionError, ExecutionInterrupted):
                     raise
                 except Exception as exc:
                     self._send({'ok': False, 'error': type(exc).__name__ + ': ' + str(exc)[:2000]})
                 if time.monotonic() >= deadline:
                     raise TimeoutError('API execution deadline exceeded')
+        except ExecutionInterrupted as exc:
+            self.close()
+            return dict(out, status='interrupted', stderr=str(exc), api_calls=calls)
         except TimeoutError as exc:
             self.close()
             return dict(out, status='timeout', stderr=str(exc))

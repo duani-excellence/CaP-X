@@ -13,12 +13,15 @@ def run():
     p.add_argument("--output-dir")
     p.add_argument('--snapshot-manifest')
     p.add_argument('--pilot-phase', choices=['prepare','oracle','models'])
+    p.add_argument("--max-tokens", type=int, help="Total completion budget including reasoning (paired pilot default: 32768)")
     a = p.parse_args()
+    if a.max_tokens is not None and a.max_tokens <= 0:
+        p.error("--max-tokens must be positive")
     if a.snapshot_manifest:
         if not a.pilot_phase or not a.output_dir:
             p.error('--snapshot-manifest requires --pilot-phase and --output-dir')
-        from capx.experiments.pilot import run as pilot_run
-        pilot_run(a.snapshot_manifest, a.pilot_phase, a.output_dir)
+        from capx.experiments.pilot import DEFAULT_MAX_TOKENS, run as pilot_run
+        pilot_run(a.snapshot_manifest, a.pilot_phase, a.output_dir, max_tokens=a.max_tokens if a.max_tokens is not None else DEFAULT_MAX_TOKENS)
         return
     configs = {
         "oracle": "env_configs/human_oracle_code/robosuite/franka_robosuite_cube_stack_privileged_oracle.yaml",
@@ -45,11 +48,17 @@ def run():
     if a.mode not in ("oracle", "vision-oracle"):
         if not url or not model or (a.backend == "cloud" and not key):
             p.error("云端配置缺失：请填写 .env.local 中对应的服务 URL、模型名和 API key。")
+    if a.mode == "web":
+        # Reuse the existing P0 vision services; never load duplicate GPU models.
+        os.environ.setdefault("GRASPNET_SERVICE_URL", "http://127.0.0.1:8215")
+        configs["web"] = "env_configs/cube_stack/franka_robosuite_cube_stack_web.yaml"
+        if a.max_tokens is None:
+            a.max_tokens = 32768
     from capx.envs.launch import LaunchArgs, main
     args = LaunchArgs(
         config_path=configs[a.mode], server_url=url, model=model,
         api_key=key, temperature=0.2,
-        max_tokens=int(os.getenv("CAPX_CLOUD_MAX_TOKENS", "16384")) if a.backend in ("cloud", "deepseek", "openai", "chatgpt") else 4096,
+        max_tokens=a.max_tokens if a.max_tokens is not None else (int(os.getenv("CAPX_CLOUD_MAX_TOKENS", "16384")) if a.backend in ("cloud", "deepseek", "openai", "chatgpt") else 4096),
         total_trials=a.trials, num_workers=1, record_video=True,
         use_oracle_code=a.mode in ("oracle", "vision-oracle"),
         use_visual_feedback=False, use_img_differencing=False,

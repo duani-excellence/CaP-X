@@ -91,6 +91,9 @@ class Session:
     # Running task reference
     task: asyncio.Task | None = None
 
+    # Parent owns only the worker PID; simulator stays inside the worker.
+    worker_pid: int | None = None
+
     # Environment reference for forced shutdown
     env: Any = None
 

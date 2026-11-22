@@ -9,6 +9,8 @@ import logging
 import os
 import threading
 import time
+import contextvars
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
 
@@ -135,17 +137,17 @@ async def run_trial_async(
             session.env_factory["cfg"]["enable_render"] = True
             session.env_factory["cfg"]["viser_debug"] = True
 
-        # Use a single-worker thread pool for ALL env operations so that MuJoCo's
-        # thread-local osmesa GL context is always available for rendering.
-        import concurrent.futures
-        env_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="env")
-        loop = asyncio.get_running_loop()
+        # P0 deadlines require the dedicated worker's main thread.
+        if not getattr(session, "process_worker", False) or threading.current_thread() is not threading.main_thread():
+            raise RuntimeError("Web trials require the dedicated process runner")
 
-        async def run_in_env_thread(func, *args):
-            return await loop.run_in_executor(env_executor, func, *args)
+        async def run_in_env_main(func, *args):
+            return func(*args)
 
+        if session.config.get("output_dir"):
+            session.env_factory["cfg"]["artifact_root"] = str(Path(session.config["output_dir"]) / "traces")
         logger.info(f"Instantiating environment for session {session.session_id}")
-        env = await run_in_env_thread(instantiate, session.env_factory)
+        env = await run_in_env_main(instantiate, session.env_factory)
 
         # Store env reference in session for safety interrupt
         session.env = env
@@ -160,6 +162,7 @@ async def run_trial_async(
             if server is not None and hasattr(server, "get_port"):
                 port = int(server.get_port())
                 set_active_viser_port(port)
+                session.publish_viser_port(port)
                 logger.info(f"Active Viser port for session {session.session_id}: {port}")
             else:
                 invalidate_viser_port_cache()
@@ -202,7 +205,7 @@ async def run_trial_async(
             frame = env.render() if hasattr(env, "render") else None
             return obs, info, frame
 
-        obs, _, initial_frame = await run_in_env_thread(_reset_and_render)
+        obs, _, initial_frame = await run_in_env_main(_reset_and_render)
         obs["full_prompt"] = copy.deepcopy(obs["full_prompt"])
 
         # Patch LIBERO task language into prompt template
@@ -398,7 +401,7 @@ async def run_trial_async(
                 )
 
         # Start streaming in background thread
-        stream_task = main_loop.run_in_executor(None, stream_to_queue)
+        stream_task = main_loop.run_in_executor(None, contextvars.copy_context().run, stream_to_queue)
 
         raw_code = ""
         reasoning = None
@@ -486,10 +489,6 @@ async def run_trial_async(
             # The emit callback sends events via WebSocket in real-time
             step_counter = [0]  # Use list to allow mutation in closure
 
-            # Capture event loop BEFORE thread execution (critical!)
-            # The callback runs in a thread pool executor, so we need the main loop reference
-            exec_main_loop = asyncio.get_running_loop()
-
             def emit_execution_step(step: execution_logger.ExecutionStep) -> None:
                 """Sync callback to emit execution steps during code execution."""
                 try:
@@ -503,7 +502,8 @@ async def run_trial_async(
                         images=step.images,
                         highlight=step.highlight,
                     )
-                    asyncio.run_coroutine_threadsafe(session.emit(event), exec_main_loop)
+                    # Send directly to the parent while the worker main loop is inside env.step.
+                    session.publish_event(event)
                     step_counter[0] += 1
                 except Exception as e:
                     logger.warning(f"Failed to emit execution step: {e}")
@@ -537,7 +537,7 @@ async def run_trial_async(
                 exec_timeout = getattr(session, 'execution_timeout', 180)
                 try:
                     (obs_next, reward, terminated, truncated, info_step), post_step_frame = await asyncio.wait_for(
-                        run_in_env_thread(_step_render_with_interrupt, code),
+                        run_in_env_main(_step_render_with_interrupt, code),
                         timeout=exec_timeout,
                     )
                 except asyncio.TimeoutError:
@@ -553,7 +553,7 @@ async def run_trial_async(
                     ))
                     # Reset env for next attempt
                     try:
-                        obs, _ = await run_in_env_thread(lambda: env.reset())
+                        obs, _ = await run_in_env_main(lambda: env.reset())
                     except Exception:
                         pass
                     break  # Exit code block loop, go to multi-turn decision
@@ -744,7 +744,7 @@ async def run_trial_async(
                             mt_main_loop
                         )
 
-                mt_stream_task = mt_main_loop.run_in_executor(None, stream_multiturn_to_queue)
+                mt_stream_task = mt_main_loop.run_in_executor(None, contextvars.copy_context().run, stream_multiturn_to_queue)
 
                 mt_content = ""
                 mt_reasoning = None
@@ -902,7 +902,6 @@ async def run_trial_async(
             # Save execution histories
             all_exec_histories = execution_logger.get_all_histories()
             if all_exec_histories:
-                from pathlib import Path
                 exec_history_dir = Path(output_dir) / "execution_history"
                 for history in all_exec_histories:
                     await asyncio.to_thread(history.save_to_directory, exec_history_dir)
@@ -921,14 +920,15 @@ async def run_trial_async(
                         frames,
                         video_dir,
                         suffix=f"{reward:.3f}",
+                        timestamps=info_step.get("frame_timestamps"),
                     )
         else:
             logger.info("No output_dir configured, skipping artifact save")
 
-        # Success if the environment reports task completion or termination with positive reward,
-        # OR if the model explicitly chose to finish in multi-turn mode.
-        task_completed = bool(info_step.get("task_completed", False)) or (terminated and reward > 0)
-        success = task_completed or num_finishes > 0
+        # Mirror P0 physical success; model FINISH text cannot make a task succeed.
+        from capx.web.process_runner import physical_task_success
+        task_completed = physical_task_success(info_step, reward, truncated)
+        success = task_completed
 
         # Collect agent code + sources of sandbox tools referenced by Call AST nodes
         api_functions: dict[str, Any] = {}
@@ -943,7 +943,6 @@ async def run_trial_async(
 
         if output_dir and code_path:
             try:
-                from pathlib import Path
                 import json as _json
 
                 trial_dir = Path(code_path).parent

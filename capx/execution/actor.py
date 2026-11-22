@@ -19,7 +19,10 @@ def send(message):
 
 def proxy(name):
     def call(*args, **kwargs):
-        send({'type': 'call', 'name': name, 'args': encode(args), 'kwargs': encode(kwargs)})
+        # Trusted bootstrap provenance; the user namespace cannot access sys/private frames.
+        site_line = sys._getframe(1).f_lineno
+        send({'type': 'call', 'name': name, 'args': encode(args), 'kwargs': encode(kwargs),
+              'site_line': site_line})
         response = json.loads(wire_in.readline())
         if not response['ok']:
             raise RuntimeError(response['error'])

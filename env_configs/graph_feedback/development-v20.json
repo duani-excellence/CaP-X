@@ -1,0 +1,158 @@
+{
+  "tasks": [
+    "stack",
+    "lift",
+    "restack"
+  ],
+  "model": "deepseek-v4-pro",
+  "groups": [
+    "B0",
+    "G0",
+    "G1"
+  ],
+  "faults": [
+    "none"
+  ],
+  "services": {
+    "sam3": "http://127.0.0.1:18114",
+    "graspnet": "http://127.0.0.1:8215",
+    "pyroki": "http://127.0.0.1:41337"
+  },
+  "budgets": {
+    "max_requests": 6000,
+    "cost_limit_usd": 1000.0,
+    "wall_seconds": 1209600,
+    "max_tokens": 32768,
+    "reasoning_effort": "low",
+    "request_timeout": 400,
+    "max_blocks": 16,
+    "api_budget": 192,
+    "block_seconds": 90,
+    "episode_seconds": 2400,
+    "max_local": 6,
+    "max_episode_local": 24,
+    "max_episode_views": 8
+  },
+  "graph_options": {
+    "diagnostic_slice": true,
+    "selective_invalidation": true,
+    "selective_recovery": true
+  },
+  "sources": [
+    "capx/experiments/graph_v2.py",
+    "capx/experiments/vision_tasks.py",
+    "capx/execution/grounded_feedback.py",
+    "capx/execution/grounded_targets.py",
+    "capx/execution/public_geometry.py",
+    "capx/execution/graph_feedback.py",
+    "capx/execution/dependency_graph.py",
+    "capx/execution/feedback.py",
+    "capx/execution/sandbox.py",
+    "capx/execution/actor.py",
+    "capx/envs/tasks/audited_stack.py",
+    "capx/envs/physical_evaluation.py",
+    "capx/multitask/runtime.py",
+    "capx/experiments/graph_feedback.py",
+    "capx/experiments/layered_feedback.py",
+    "capx/llm/providers.py",
+    "capx/llm/client.py",
+    "capx/experiments/graph_campaign.py",
+    "capx/experiments/graph_statistics.py",
+    "capx/integrations/franka/control.py",
+    "capx/envs/tasks/franka/franka_pick_place.py",
+    "capx/envs/tasks/franka/franka_lift.py",
+    "capx/envs/tasks/franka/franka_cube_restack.py",
+    "capx/envs/simulators/robosuite_base.py",
+    "capx/envs/simulators/robosuite_cubes.py",
+    "capx/envs/simulators/robosuite_cube_lift.py",
+    "capx/envs/simulators/robosuite_cubes_restack.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/stack.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/lift.py",
+    "capx/execution/grip_offset.py",
+    "capx/execution/support_geometry.py",
+    "capx/execution/grounded_control.py",
+    "capx/experiments/graph_v2_analysis.py",
+    "capx/experiments/graph_power.py",
+    "capx/experiments/graph_preflight.py",
+    "capx/execution/grasp_geometry.py",
+    "capx/execution/control_frames.py",
+    "capx/execution/table_clearance.py",
+    "capx/execution/robot_self_geometry.py",
+    "capx/execution/bounded_ik.py",
+    "capx/execution/public_camera.py",
+    "capx/execution/depth_sampling.py"
+  ],
+  "prompt_files": [
+    "capx/execution/grounded_feedback.py",
+    "capx/experiments/graph_v2.py",
+    "capx/envs/tasks/franka/franka_pick_place.py",
+    "capx/envs/tasks/franka/franka_lift.py",
+    "capx/envs/tasks/franka/franka_cube_restack.py"
+  ],
+  "scoring_files": [
+    "capx/envs/physical_evaluation.py",
+    "capx/envs/tasks/audited_stack.py",
+    "capx/multitask/runtime.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/stack.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/lift.py"
+  ],
+  "note": "Development v20: same v19 substrate/budgets; current public empty-jaw evidence blocks an active holding command before dispatch and clears current grasp state. Shared G0/G1; no scoring, geometry threshold or Sandbox changes. Not formal effect evidence.",
+  "study": "normal",
+  "runtime_environment": {
+    "MUJOCO_GL": "egl",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "__EGL_VENDOR_LIBRARY_FILENAMES": "/usr/share/glvnd/egl_vendor.d/50_mesa.json",
+    "MUJOCO_EGL_DEVICE_ID": "1",
+    "JAX_PLATFORMS": "cpu",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "cli_files": [
+    "scripts/local/graph_experiment.sh",
+    "scripts/local/common.sh"
+  ],
+  "asset_files": [
+    "capx/integrations/robosuite/controllers/config/robots/panda_joint_ctrl.json",
+    "outputs/reproduction/graph-complete-20261120/control-static-calibration-v2/robot-model.xml",
+    "capx/third_party/robosuite/robosuite/models/assets/robots/panda/robot.xml",
+    "capx/third_party/robosuite/robosuite/models/assets/bases/rethink_mount.xml",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/urdf/panda.urdf",
+    "outputs/reproduction/graph-complete-20261120/robot-selfseg-asset-closure.json",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/finger.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/hand.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link0.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link1.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link2.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link3.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link4.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link5.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link6.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link7.dae",
+    "capx/third_party/robosuite/robosuite/models/assets/grippers/panda_gripper.xml",
+    "capx/third_party/robosuite/robosuite/models/assets/grippers/meshes/panda_gripper/finger_vis.stl",
+    "capx/third_party/robosuite/robosuite/models/assets/grippers/meshes/panda_gripper/hand_vis.stl"
+  ],
+  "robot_calibration_file": "outputs/reproduction/graph-complete-20261120/control-static-calibration-v2/calibration.json",
+  "allowed_graph_ablations": [
+    {
+      "diagnostic_slice": false,
+      "selective_invalidation": true,
+      "selective_recovery": true
+    },
+    {
+      "diagnostic_slice": true,
+      "selective_invalidation": false,
+      "selective_recovery": true
+    },
+    {
+      "diagnostic_slice": true,
+      "selective_invalidation": true,
+      "selective_recovery": false
+    }
+  ],
+  "service_inventory": "outputs/reproduction/graph-complete-20261120/preflight-v4/service-inventory.json",
+  "mechanism_scene_subset": {
+    "rule": "first_scene_index",
+    "scenes_per_task": 20
+  }
+}
