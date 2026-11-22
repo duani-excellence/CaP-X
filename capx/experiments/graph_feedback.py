@@ -64,13 +64,23 @@ def graph_recovery_prompt(obs, code, feedback, status, mode, *, api_doc=None):
     fallback = mode == 'G1' and (not isinstance(selected, str) or not selected.strip())
     if fallback:
         selected = code
+    from capx.execution.diagnostic_context import bounded
+    original_selected=selected
+    selected,code_stats=bounded(selected,max_chars=6000,max_string=5600)
+    if not isinstance(selected,str):selected='[Prior code omitted; full program archived. Write a self-contained legal recovery.]'
+    critical=copy.deepcopy(feedback.get('critical_current_state'))
+    feedback,feedback_stats=bounded(feedback,max_chars=24000)
+    if critical is not None:feedback['critical_current_state']=critical
     context = {'full_prompt': copy.deepcopy(obs['full_prompt'])}
     context['full_prompt'].append({'role': 'user', 'content': [{'type': 'text', 'text': _api_doc(api_doc)}]})
     prompt = _layered_export('recovery_prompt')(context, selected, feedback, status)
     conservative_fallback = feedback.get('recovery_scope', {}).get('fallback') is True
     return prompt, dict(diagnostic_source_fallback=fallback or conservative_fallback,
                         previous_code_selection='full_block' if mode == 'G0' or fallback or conservative_fallback else 'dependency_slice',
-                        previous_code_hash=digest(selected))
+                        previous_code_hash=digest(selected),
+                        original_code_hash=digest(original_selected),
+                        context_budget=dict(code=code_stats,feedback=feedback_stats,
+                            dynamic_chars=len(selected)+len(json.dumps(feedback,default=json_value))))
 
 
 def parse_graph_recovery(content):

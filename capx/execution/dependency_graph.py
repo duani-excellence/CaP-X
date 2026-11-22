@@ -14,7 +14,7 @@ import json
 
 _IMMUTABLE = {'program', 'capability', 'verification_fact'}
 _WORK = {'observation', 'estimate', 'plan', 'check'}
-_EDGE_KINDS = {'data', 'precondition'}
+_EDGE_KINDS = {'data', 'precondition', 'attestation'}
 
 
 def _plain(value):
@@ -39,6 +39,7 @@ class DependencyGraph:
         self._versions = {}
         self._children = {}
         self._parents = {}
+        self._propagating_children = {}
 
     def _event(self, action, **fields):
         event = _plain(dict(sequence=len(self.events) + 1, action=action, **fields))
@@ -89,10 +90,14 @@ class DependencyGraph:
         self.nodes[node_id] = node
         self._children[node_id] = []
         self._parents[node_id] = []
+        self._propagating_children[node_id] = []
         for source, edge_kind in parents:
             self.edges.append(dict(source=source, target=node_id, kind=edge_kind))
             self._children[source].append(node_id)
             self._parents[node_id].append(source)
+            # Historical verification remains provenance, not a current pose
+            # dependency. Explicit physical condition updates still propagate.
+            if edge_kind != 'attestation':self._propagating_children[source].append(node_id)
         self._event('add', node=node, parents=[dict(source=p, kind=k) for p, k in parents])
         return node_id
 
@@ -123,7 +128,7 @@ class DependencyGraph:
             if current in visited:
                 continue
             visited.add(current)
-            pending.extend(self._children[current])
+            pending.extend(self._propagating_children[current])
         changed = []
         for node_id, node in self.nodes.items():
             if node_id not in visited or node['kind'] in _IMMUTABLE:
@@ -203,7 +208,11 @@ class DependencyGraph:
         if max_nodes < 1:
             raise ValueError('max_nodes must be positive')
         relevant = self.ancestors(roots)
-        selected = relevant[-max_nodes:]
+        # Keep failure roots first even when their ancestors/history is huge.
+        failures=[n for n in reversed(relevant) if self.nodes[n]['kind']=='check'
+                  and (self.nodes[n]['data'] or {}).get('status') in ('FAIL','UNCERTAIN')]
+        chosen = list(dict.fromkeys(roots + failures + list(reversed(relevant))))[:max_nodes]
+        selected = relevant if len(relevant)<=max_nodes else chosen
         selected_set = set(selected)
         evidence_invalid = [n for n in relevant if not self.nodes[n]['valid']]
         # Diagnosis is a backward evidence slice, but recovery must also account
@@ -220,20 +229,33 @@ class DependencyGraph:
         invalid = [n for n in self.nodes if n in affected and not self.nodes[n]['valid']]
         preserved = [n for n, node in self.nodes.items() if node['valid']]
         completed = [n for n, node in self.nodes.items() if node['kind'] == 'call' and node['state'] == 'done']
+        from .diagnostic_context import bounded
+        cap=lambda values: values[-max_nodes:]
         def by_kind(kinds):
-            return [n for n in invalid if self.nodes[n]['kind'] in kinds]
-        result = dict(schema='capx.execution_dependencies.v1', mode=self.mode, roots=roots,
-                      nodes=[self.nodes[n] for n in selected],
-                      edges=[e for e in self.edges if e['source'] in selected_set and e['target'] in selected_set],
-                      invalidated=invalid, evidence_invalidated=evidence_invalid, preserved=preserved,
-                      completed_calls=completed, truncated=len(relevant) > max_nodes,
-                      recovery_scope=dict(impacted=invalid, preserved=preserved,
+            return cap([n for n in invalid if self.nodes[n]['kind'] in kinds])
+        nodes=[]
+        for n in selected:
+            node=copy.deepcopy(self.nodes[n])
+            node['data'],stats=bounded(node['data'],max_chars=1200,max_items=8,max_string=240)
+            if stats['truncated']:node['data_truncation']=stats
+            node['invalidated_by']=cap(node['invalidated_by'])
+            nodes.append(node)
+        result = dict(schema='capx.execution_dependencies.v1', mode=self.mode, roots=roots[:max_nodes],
+                      nodes=nodes,
+                      edges=[e for e in self.edges if e['source'] in selected_set and e['target'] in selected_set][:max_nodes*4],
+                      invalidated=cap(invalid), evidence_invalidated=cap(evidence_invalid), preserved=cap(preserved),
+                      completed_calls=cap(completed), truncated=any(len(v)>max_nodes for v in (relevant,roots,invalid,preserved,completed)),
+                      recovery_scope=dict(impacted=cap(invalid), preserved=cap(preserved),
                                           scope_basis='invalid evidence ancestors and their invalid downstream suffix; completed calls never replay',
                                           reobserve=by_kind({'observation', 'estimate'}),
                                           recompute=by_kind({'plan'}), revalidate=by_kind({'check'}),
                                           blocked_calls=by_kind({'call'}),
-                                          never_replay=completed,
+                                          never_replay=cap(completed),
                                           policy='all_unexecuted_suffix' if self.mode == 'G0' else 'affected_dependencies'))
+        result['diagnostic_stats']=dict(graph_nodes=len(self.nodes),relevant_nodes=len(relevant),
+            roots=len(roots),invalidated=len(invalid),preserved=len(preserved),completed_calls=len(completed),
+            selected_nodes=len(nodes),max_nodes=max_nodes,reason='bounded_recovery_slice_full_history_archived',
+            execution_consults_full_graph=True)
         return copy.deepcopy(result)
 
     def snapshot(self):

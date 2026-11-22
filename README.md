@@ -1,6 +1,6 @@
 # CaP-X 常用指令速查
 
-图驱动执行反馈当前版本、动作准入修复、有界恢复及复跑命令见 [Graph V21 说明](docs/feedback/graph-v2.md#v21-动作准入与有界恢复)；DeepSeek 恢复后的真实在线结果和 V21.3 修复见 [最新验收报告](docs/reports/graph-feedback-v21-online-resume-2026-11-22.md)，早期结果保留在 [V21 报告](docs/reports/graph-feedback-v21-2026-11-22.md)。
+图驱动执行反馈的条件图、局部恢复与当前复跑命令见 [Graph V22 说明](docs/feedback/graph-v22.md)，验收范围见 [V22 开发报告](docs/reports/graph-feedback-v22-development-2026-11-22.md)。原路径和历史结果保留在 [Graph V21 说明](docs/feedback/graph-v2.md#v21-动作准入与有界恢复)、[V21.3 验收报告](docs/reports/graph-feedback-v21-online-resume-2026-11-22.md)和 [早期 V21 报告](docs/reports/graph-feedback-v21-2026-11-22.md)。
 
 Stack 的 DeepSeek + Vision 分层反馈与 A–E 配对实验见 [分层反馈 README](docs/feedback/README.md)。
 

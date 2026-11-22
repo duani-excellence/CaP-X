@@ -21,7 +21,7 @@ from .grounded_control import precise_goto
 from .support_geometry import color_points, current_support, reliable_top, retained_consistent
 from .grip_offset import calibrate as calibrate_attachment, predict as predict_attachment, check_surface as check_attachment
 
-APIS=['observe_object','observe_grasp','observe_surfaces','observe_table','reobserve_table','read_robot','plan_skill','run_plan','recall_result','verify_hold']
+APIS=['observe_object','observe_grasp','observe_surfaces','observe_table','reobserve_table','read_robot','plan_skill','run_plan','recall_result','verify_hold','verify_task']
 API_DOC='''Grounded Vision API, robot-base metres and WXYZ. Actual SAM3/GraspNet and calibrated RGB-D are used. No simulator truth.
 Sandbox: use self-contained Python with only numpy imports. Names beginning with underscore (except the single '_' loop placeholder) and private attributes are forbidden; use id_of, not _id.
 Perception failure interrupts the entire actor; observe_* does NOT return None on failure. Do not call a known-failing observation and then branch on None or try to catch the interruption. Use recovery_preconditions before retrying. If a held cube occludes its support at placement height, plan a bounded upward observation move from a fresh robot source before retrying support observation; existing phase/control/budget checks still apply. Never release without current permission.
@@ -50,9 +50,11 @@ Restack: green begins on red. First move green to a verified empty table patch, 
 Recovery: inspect phase, grasp_active, recovery_scope and recovery_preconditions. If grasp_active is false and phase is ready, no object is currently held; last_manipulated_object and last_grasp_loss are history only. Open empty jaws, observe the actual scene, and replan remaining work. Do not place or retreat as though a historical grasp still existed. On pre_motion_table_target_rejected or table_clearance_current_nonheld_obstacle_in_table_region, call observe_table again to obtain an alternative, then refresh held surface and robot and create a new table_place plan. Do not repeatedly reobserve or plan the rejected region; never repeat grasp/lift just to change the table target. For missing_geometry_objects, call observe_object on each named nonheld object, then reobserve_table(region_id, change_view=False), refresh held/robot sources and create a new plan; no wrist movement is needed just to acquire missing geometry. If a returned place was followed by retreat_requires_release, release is still pending: revalidate as required, explicitly open_gripper(), then fresh retreat. If holding_unverified call verify_hold; do not close again or repeatedly raise. If released, fresh retreat only. If holding_verified reobserve only required invalid sources, compute fresh place target. Do not replay completed physical actions. Missing evidence can require an explicit unsuccessful stop.
 '''
 
+V22_API_DOC=API_DOC+'''\nverify_task(): refresh deployment-observable task conditions. Does not move, release, or return physical reward. Restack green-on-table is an INTERMEDIATE goal; red-on-green and safe retreat are still required. UNKNOWN requires evidence, not replay of historical actions. Returned API calls are not proof of their expected effects.\n'''
+
 
 class GroundedMonitor(GraphFeedbackMonitor):
-    def __init__(self,mode,task,observe,*,emit=None,graph_emit=None,max_local=3,max_episode_local=8,max_episode_views=2,fault='none',site=None,graph_options=None,motion_transform=None,ik_success_count=None):
+    def __init__(self,mode,task,observe,*,emit=None,graph_emit=None,max_local=3,max_episode_local=8,max_episode_views=2,fault='none',site=None,graph_options=None,motion_transform=None,ik_success_count=None,task_conditions=False):
         if task not in ('stack','lift','restack'):raise ValueError('Unsupported task')
         if type(max_episode_views) is not int or max_episode_views<0:raise ValueError('Invalid episode view budget')
         options=dict(diagnostic_slice=True,selective_invalidation=True,selective_recovery=True)
@@ -83,6 +85,14 @@ class GroundedMonitor(GraphFeedbackMonitor):
         self.visibility_contexts=[];self.visibility_context=None
         self.visibility_translation_m=.03  # Resource-policy separation, never a geometry acceptance tolerance.
         self.observation_calibration_sources=[];self.rejected_table_targets=[];self.last_grasp_loss=None
+        self.conditions=None
+        if task_conditions:self.enable_task_conditions()
+
+    def enable_task_conditions(self):
+        if self.conditions is None:
+            from .task_conditions import TaskConditions
+            self.conditions=TaskConditions(self.graph,self.task)
+        return self.conditions
 
     def register_camera_calibration(self,metadata):
         """Bind every corrected frame to its exact public projection version.
@@ -145,6 +155,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
         for name,surface in current_surfaces:
             fact=self.graph.add('verification_fact',{'type':'historical_full_support_surface','object':name,'object_epoch':self.object_epochs[name],'surface':surface},parents=[self.last_observation,self.geometry_ids[name]])
             self.support_history[name]={'epoch':self.object_epochs[name],'surface':copy.deepcopy(surface),'source_id':fact}
+        if self.conditions:self.conditions.refresh(self)
         return state,self.last_evidence
 
     def record(self,layer,check,status,reason,metrics=None,action='continue',graph_parents=(),**extra):
@@ -163,6 +174,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
                     'historical_only':True,'check':check,'status':status,
                     'source_check_id':self.last_check,'grasp_epoch':self.grasp_epoch,
                     'object':self.held_object,'metrics':metrics or {}},parents=[self.last_check])
+                if self.conditions:self.conditions.check_event(self,check,status,self.skill_facts[check])
             if status!='PASS':self.roots=[self.last_check]+([self.active_plan] if self.active_plan else [])
         return row
 
@@ -177,6 +189,9 @@ class GroundedMonitor(GraphFeedbackMonitor):
         super()._physical_effect_unknown(name,node)
         self.reconciliation_required['previous_phase']=previous
         self.attachment=None;self.attachment_id=None;self.last_place=None
+        if self.conditions:
+            for key in list(self.conditions.ids):
+                self.conditions.set(key,'UNKNOWN',reason='unknown_physical_effect_quarantine')
         self.record('L1','action_completion','UNCERTAIN','unknown_physical_effect',
             {'api':name,'previous_phase':previous,'public_robot':self.last_public,
              'controller_completion_receipt':'unavailable','recoverable':False},action='terminal_stop')
@@ -348,6 +363,21 @@ class GroundedMonitor(GraphFeedbackMonitor):
                 {'plan_id':plan_id,'changed_sources':changed,'already_started':contract['started'],
                  'completed_calls':list(self.call_history)},action='replan',graph_parents=changed)
             self._stop('active_skill_external_dependency_changed',[plan_id,self.last_check]+changed)
+        if self.conditions:
+            required=self.graph.nodes[plan_id]['data'].get('required_conditions',[])
+            failed=[key for key in required if self.conditions.get(key)['truth']=='FALSE']
+            unknown=[key for key in required if self.conditions.get(key)['truth']=='UNKNOWN']
+            # A missing Restack stage witness can only inherit the SAME explicit
+            # clear-transit policy as its support geometry. It cannot authorize
+            # descent or release; a contradictory condition never permits motion.
+            conditional_keys=['placed:green cube:table'] if 'green cube' in conditional else []
+            missing_conditions=[key for key in unknown if key not in conditional_keys]
+            if failed or missing_conditions:
+                keys=failed+missing_conditions
+                self._stop('active_task_condition_requires_revalidation',
+                    [self.conditions.get(key)['id'] for key in keys if self.conditions.get(key)['id']],
+                    metrics={'failed_conditions':keys,'recoverable':True,
+                             'next_action':'restore_task_prerequisite_before_remaining_motion'})
         policy='conditional_history_clear_transit' if conditional else 'current_localization'
         self.graph._event('active_dependency_revalidation',plan_id=plan_id,
             source_ids=contract['sources'],expected_external_epochs=contract['external_epochs'],
@@ -381,6 +411,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
             self.graph.invalidate(roots,'public_source_replaced:'+key)
         node=self.graph.version(key,'estimate',data,parents=list(parents)+([self.last_observation] if self.last_observation else []),invalidate=False)
         self.change_roots=[node]
+        if self.conditions:self.conditions.api_source(node)
         return {'id':node,**copy.deepcopy(data)}
 
     def _surface(self,name):
@@ -757,13 +788,26 @@ class GroundedMonitor(GraphFeedbackMonitor):
         parents=[(i,'data') for i in inputs.values()]+[(self.capability,'precondition')]
         if self.fragment:parents.append(self.fragment)
         if skill in ('place','table_place','retreat'):parents.append((self.placement,'precondition'))
+        condition_keys=self._skill_condition_keys(skill,obj)
+        if self.conditions:
+            parents += [(self.conditions.get(key)['id'],'precondition') for key in condition_keys
+                        if self.conditions.get(key)['truth']=='TRUE']
         references={}
         if skill=='approach' and sources['grasp']['data'].get('reference_surface'):
             references[obj]=copy.deepcopy(sources['grasp']['data']['reference_surface'])
         elif skill=='place':
             support=sources['support_surface']['data'];references[support['object']]=copy.deepcopy(support)
         return self.graph.add('plan',dict(skill=skill,object=obj,inputs=inputs,params=params or {},
-            external_references=references,**target),parents=parents)
+            required_conditions=condition_keys,external_references=references,**target),parents=parents)
+
+    def _skill_condition_keys(self,skill,obj):
+        if not self.conditions:return []
+        if skill in ('place','table_place'):
+            keys=['holding:'+str(obj)]
+            if self.task=='restack' and skill=='place' and obj=='red cube':keys.append('placed:green cube:table')
+            return keys
+        if skill=='approach' and self.task=='restack' and obj=='red cube':return ['placed:green cube:table']
+        return []
 
     def _effects(self,name):
         roots=[]
@@ -789,6 +833,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
                     self.active_dependencies['external_epochs'][obj]+=1
         self.graph._event('physical_effect',api=name,phase=self.phase,held_object=self.held_object,
                           object_epochs=self.object_epochs,invalidated_sources=roots)
+        if self.conditions:self.conditions.motion_effect(self,name)
 
     def _grasp_lost(self,reason):
         """Commit existing public empty-jaw evidence; keep actions as history."""
@@ -803,6 +848,9 @@ class GroundedMonitor(GraphFeedbackMonitor):
             'normalized_jaw_opening':float(self.last_public['robot_cartesian_pos'][7]),
             'object_location_known':False,'completed_actions_remain_history':True},parents=parents)
         self.last_grasp_loss={'object':obj,'reason':reason,'grasp_epoch':self.grasp_epoch,'source_id':fact}
+        if self.conditions:
+            for predicate in ('holding','lifted'):
+                self.conditions.set(predicate+':'+obj,'FALSE',evidence=[fact],reason='public_grasp_lost')
         if obj in self.object_epochs:self.object_epochs[obj]+=1
         self.phase='ready';self.closed=self.lifted=False;self.held_object=None
         self.approached_object=None;self.attachment=None;self.attachment_id=None
@@ -923,6 +971,11 @@ class GroundedMonitor(GraphFeedbackMonitor):
         elif skill in ('place','table_place') and self.phase!='holding_verified':reason='verify_hold_before_place'
         elif skill=='retreat' and self.phase!='released':reason='retreat_requires_release'
         self._phase_guard(skill,reason is None,reason or 'current_skill_phase_verified',[plan_id])
+        if self.conditions:
+            missing=[key for key in self._skill_condition_keys(skill,d['object'])
+                     if self.conditions.get(key)['truth']!='TRUE']
+            if missing:self._stop('task_condition_requires_revalidation',[plan_id],metrics={
+                'failed_conditions':missing,'recoverable':True,'next_action':'verify_task_or_restore_required_condition'})
         if skill=='place' and self.fault=='support_refresh' and not self.fault_fired:
             self.fault_fired=True;name=self.graph.nodes[d['inputs']['support_surface']]['data']['object']
             self._surfaces(name);self._valid(plan_id)
@@ -986,6 +1039,13 @@ class GroundedMonitor(GraphFeedbackMonitor):
             elif skill=='retreat':
                 self.phase='ready';self.retreat_completed=True;self.released=False;self.approached_object=None;self.held_object=None
             self.graph._event('skill_returned',plan_id=plan_id,skill=skill,call_id=self.last_call,phase=self.phase)
+            if self.conditions:
+                obj=d.get('object') or (self.last_place or {}).get('object')
+                dest=next((dst for name,dst in self.conditions.stages if name==obj),None)
+                fact=self.conditions.returned(skill,obj,dest,self.last_call,plan_id)
+                if skill=='retreat':
+                    self.conditions.set('safe_retreat','TRUE',evidence=[fact],reason='public_tcp_verified_retreat')
+                self.conditions.refresh(self)
             return {'plan_id':plan_id,'status':'returned','call_id':self.last_call}
         except ExecutionInterrupted as exc:
             if (skill=='table_place' and str(exc)=='pre_motion_rejected'
@@ -1009,6 +1069,13 @@ class GroundedMonitor(GraphFeedbackMonitor):
         finally:self.active_plan=None;self.active_dependencies=None
 
     def _release_evidence(self,target,held=None):
+        if self.conditions and self.task=='restack' and target['skill']=='place' and self.held_object=='red cube':
+            prerequisite=self.conditions.get('placed:green cube:table')
+            if prerequisite['truth']!='TRUE':
+                self._stop('task_condition_requires_revalidation_before_release',
+                    [prerequisite['id']] if prerequisite['id'] else [],metrics={
+                        'failed_conditions':['placed:green cube:table'],'recoverable':True,
+                        'next_action':'verify_or_restore_prior_task_stage_before_release'})
         table_gate=None
         if target['skill']=='table_place':
             # Table validation captures again. All held/release evidence must
@@ -1072,6 +1139,9 @@ class GroundedMonitor(GraphFeedbackMonitor):
         self._tracked(fn)('open_gripper',[],{})
         self.closed=self.lifted=False;self.phase='released';self.released=True;self.retreat_completed=False
         self._effects('open_gripper')
+        if self.conditions:
+            dest=next((dst for obj,dst in self.conditions.stages if obj==self.held_object),None)
+            self.conditions.returned('release',self.held_object,dest,self.last_call)
         self.record('L2','release','PASS','public_geometry_allowed_release',{'physical_success':'independent_evaluator_only'})
         return None
 
@@ -1119,6 +1189,10 @@ class GroundedMonitor(GraphFeedbackMonitor):
         if name=='plan_skill':return self._plan_skill(*args,**kwargs)
         if name=='run_plan':return self._run(*args,**kwargs,fn=fn)
         if name=='verify_hold':return self._verify_hold(fn)
+        if name=='verify_task':
+            if not self.conditions:self._stop('task_conditions_not_enabled')
+            self.capture()
+            return self.conditions.summary()
         if name=='recall_result':
             value=self._valid(args[0] if args else kwargs['id'])
             if value['kind']!='estimate':self._stop('only_estimates_recallable')
@@ -1166,13 +1240,17 @@ class GroundedMonitor(GraphFeedbackMonitor):
         self.capture()
         candidate=(self.task=='lift' and self.phase=='holding_verified' or
                    self.task!='lift' and self.phase=='ready' and self.retreat_completed and not self.closed and not self.released)
+        conditions=getattr(self,'conditions',None)
+        if conditions:candidate=candidate and conditions.complete()
         return self.record('L2','task_candidate','PASS' if candidate else 'UNCERTAIN',
-            'public_stage_only_not_physical_success',{'phase':self.phase},action='finish_candidate' if candidate else 'replan')
+            'public_task_conditions_not_physical_success' if conditions else 'public_stage_only_not_physical_success',
+            {'phase':self.phase,**({'remaining_goals':conditions.remaining_goals()} if conditions else {})},
+            action='finish_candidate' if candidate else 'replan')
 
     def summary(self):
         value=super().summary()
         last_guard=next((e for e in reversed(self.events) if e['check']=='dependency_guard'),None)
-        allowed={'recoverable','next_action','missing_geometry_objects','reobserve_change_view','region_id','program_error','rejected_region_id','missing_surface_object','perception_failure_behavior'}
+        allowed={'recoverable','next_action','missing_geometry_objects','reobserve_change_view','region_id','program_error','rejected_region_id','missing_surface_object','perception_failure_behavior','failed_conditions'}
         value['recovery_preconditions']={k:copy.deepcopy(v) for k,v in
             (last_guard['metrics'] if last_guard else {}).items() if k in allowed}
         if not self.graph_options['diagnostic_slice']:
@@ -1195,4 +1273,33 @@ class GroundedMonitor(GraphFeedbackMonitor):
         # All public source roles, not just v1 robot/grasp estimates.
         value['available_results']=[{'id':n['id'],**copy.deepcopy(n['data'])} for n in self.graph.nodes.values()
             if n['kind']=='estimate' and n['valid'] and isinstance(n['data'],dict) and n['data'].get('type') in ('object','surface','grasp','robot','table_region')][-16:]
+        if self.conditions:
+            if self.closed and self.phase=='holding_verified' and self.last_place:
+                obj=self.held_object;dest=next((d for o,d in self.conditions.stages if o==obj),None)
+                label=str(obj)+':'+str(dest)
+                if 'positioned:'+label in self.conditions.history:
+                    try:
+                        check=self._release_evidence(self.last_place)
+                        truth={'PASS':'TRUE','FAIL':'FALSE','UNCERTAIN':'UNKNOWN'}[check['status']]
+                        evidence=[self.last_check]
+                    except ExecutionInterrupted:
+                        truth='UNKNOWN';evidence=[self.last_observation]
+                    self.conditions.set('aligned:'+label,truth,evidence=evidence,
+                        epochs={'robot':self.robot_epoch,'object':self.object_epochs[obj],
+                                'support':self.object_epochs.get(dest)},reason='current_geometry_after_returned_positioning')
+            value['task_conditions']=self.conditions.summary()
+            value['last_repair_decision']=copy.deepcopy(getattr(self,'last_repair_decision',None))
+        # Presentation limits do not change any parent-side admission/recovery
+        # decision. All receipts, conditions and graph events remain archived.
+        from .diagnostic_context import bounded
+        critical={k:value.get(k) for k in ('terminal_reason','phase','reconciliation_required','recovery_preconditions')}
+        critical['failed_checks']=[{k:e.get(k) for k in ('layer','check','status','reason')}
+            for e in self.events if e.get('status') in ('FAIL','UNCERTAIN')][-4:]
+        if self.conditions:
+            critical['conditions']=[{'key':k,'truth':self.conditions.get(k)['truth'],
+                'reason':self.conditions.get(k)['reason']} for k in self.conditions.ids]
+            critical['remaining_goals']=self.conditions.remaining_goals()
+        value,stats=bounded(value,max_chars=20000)
+        value['critical_current_state']=critical
+        value['context_stats']=stats
         return value

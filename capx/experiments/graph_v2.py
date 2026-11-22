@@ -135,6 +135,7 @@ def limits(config):
     b=dict(max_blocks=6,api_budget=128,max_local=3,max_episode_local=8,max_episode_views=2,block_seconds=90,episode_seconds=1800)
     b.update(config.get('budgets',{}))
     if type(b.get('bounded_recovery',False)) is not bool:raise ValueError('bounded_recovery must be boolean')
+    if type(b.get('task_conditions',False)) is not bool:raise ValueError('task_conditions must be boolean')
     for key in ('max_recovery_plans','max_recovery_no_progress'):
         if key in b and (type(b[key]) is not int or b[key]<1):raise ValueError('Invalid recovery budget '+key)
     for key in ('max_blocks','api_budget','block_seconds','episode_seconds'):
@@ -171,8 +172,8 @@ def base_prompt(env,task,group,budgets):
         prompt=copy.deepcopy(env._full_prompt)
         docs='\n'.join(api.combined_doc() for api in env._apis.values())
     else:
-        from capx.execution.grounded_feedback import API_DOC
-        docs=API_DOC
+        from capx.execution.grounded_feedback import API_DOC,V22_API_DOC
+        docs=V22_API_DOC if budgets.get('task_conditions',False) else API_DOC
         prompt=[{'role':'system','content':'Generate Python using only the documented public robot and Vision APIs and numpy. No files, network, private attributes, env, obs or simulator state.'},
                 {'role':'user','content':env._task_prompt+'\nAPI documentation:\n'+docs}]
     prompt.append({'role':'user','content':CONDITIONS[task]+'\nUse deployment-observable Vision/robot state only. '
@@ -266,7 +267,7 @@ def install_monitor(env,group,task,dest,budgets,fault):
     monitor=GroundedMonitor(group,task,observe,emit=emit,graph_emit=graph_emit,max_local=budgets['max_local'],
         max_episode_local=budgets['max_episode_local'],max_episode_views=budgets.get('max_episode_views',2),
         fault=fault,site=lambda:env._actor.call_site,graph_options=budgets.get('graph_options'),motion_transform=motion_transform,
-        ik_success_count=lambda:api.ik_solve_fn.successful_calls)
+        ik_success_count=lambda:api.ik_solve_fn.successful_calls,task_conditions=budgets.get('task_conditions',False))
     if task=='restack':
         from capx.execution.robot_self_geometry import PandaSelfGeometry
         from capx.execution.table_clearance import current_table_evidence
@@ -501,8 +502,7 @@ def run_episode(output,task,seed,repeat,snapshot,config,budget,group,initial=Non
                 else:
                     feedback=monitor.summary();feedback.update(remaining_api_calls=b['api_budget']-env._api_calls,remaining_code_blocks=b['max_blocks']-block-1,
                         completion_check=check)
-                    from capx.execution.grounded_feedback import API_DOC
-                    prompt,selection=graph_recovery_prompt({'full_prompt':base},code,feedback,info['execution_status'],group,api_doc=API_DOC)
+                    prompt,selection=graph_recovery_prompt({'full_prompt':base},code,feedback,info['execution_status'],group,api_doc=docs)
                     context=dict(feedback=feedback,**selection)
                 save(dest/f'recovery-context-{block+1}.json',context);save(dest/f'recovery-prompt-{block+1}.json',prompt)
                 guard_sources()

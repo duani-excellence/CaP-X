@@ -1,5 +1,7 @@
 # 图驱动执行反馈：开发与正式评测入口
 
+V22 增量开发、条件图开关及小规模诊断命令见 [Graph V22](graph-v22.md)。下文保留 V21 历史流程；正式评测是否就绪以最新开发报告为准。
+
 正式项目目录为 `/home/hanyu/dqb/cap-x-20261106`。此版本复用原有父进程 API broker、Bubblewrap actor、DeepSeek Provider、Snapshot 与独立物理评分。当前为 V21.3 开发验收阶段，DeepSeek 已恢复并完成新在线请求。V20 的 360 个 episode 已结束（包含 API 失败）；历史程序重放、新生成在线验收及不同版本结果分别报告。正式 1,800 episode 测试尚未开始，开发结果不能替代正式效果证据。最新状态见 [在线验收报告](../reports/graph-feedback-v21-online-resume-2026-11-22.md)。
 
 ## 三个系统
