@@ -60,15 +60,21 @@ class ModelBudget:
                  attempts=0,status='started',cost_upper_usd=bound)
         self.rows.append(row)
         def observe(attempt,payload,response,error):
+            # Transport evidence must survive malformed/null provider metadata.
+            row.update(attempts=attempt,http_status=getattr(response,'status_code',None),
+                error=error,request_id=(getattr(response,'headers',{}) or {}).get('x-request-id')
+                    or (getattr(response,'headers',{}) or {}).get('x-ds-request-id'))
             body={}
             if response is not None:
                 try:body=response.json()
                 except ValueError:pass
-            usage=body.get('usage',{});it=usage.get('prompt_tokens');ot=usage.get('completion_tokens')
-            cost=(it*1.32+ot*3.96)/1e6 if it is not None and ot is not None else bound
+            metadata=body if isinstance(body,dict) else {}
+            usage=metadata.get('usage');usage=usage if isinstance(usage,dict) else {}
+            it=usage.get('prompt_tokens');ot=usage.get('completion_tokens')
+            known=all(type(v) is int and v>=0 for v in (it,ot))
+            cost=(it*1.32+ot*3.96)/1e6 if known else bound
             self.ledger.spent['deepseek']+=cost
-            row.update(attempts=attempt,http_status=getattr(response,'status_code',None),usage=usage,
-                       cost_upper_usd=cost,error=error,request_id=(getattr(response,'headers',{}) or {}).get('x-request-id') or (getattr(response,'headers',{}) or {}).get('x-ds-request-id'), response_id=body.get('id'))
+            row.update(usage=usage if known else {},usage_known=known,cost_upper_usd=cost,response_id=metadata.get('id'))
             dump(dest/'http.json',dict(payload=payload,response=body,**row))
         args=ModelQueryArgs(model=model,server_url=url,api_key=key,max_tokens=self.max_tokens,max_attempts=1,
                             request_timeout=min(self.request_timeout,remaining),response_observer=observe,deepseek_reasoning_effort=self.reasoning_effort)

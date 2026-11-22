@@ -5,6 +5,7 @@ inputs are filtered public observations. Physical evaluators stay in the runner.
 """
 from __future__ import annotations
 import copy
+import time
 import hashlib
 import json
 import numpy as np
@@ -73,6 +74,10 @@ class GroundedMonitor(GraphFeedbackMonitor):
         self.recovery_outcomes=[];self.attachment=None;self.attachment_id=None
         self.support_history={};self.colored_points={};self.active_authorization=None
         self.active_dependencies=None
+        self.release_permission=None
+        self.skill_intent=None
+        self.timing=dict(public_observation_seconds=0.,control_seconds=0.,perception_api_seconds=0.,monitor_dispatch_seconds=0.)
+        self.contract_calls={}
         self.visibility_probes=0;self.visibility_reference_q=None;self.perception_refinements=0
         self.max_episode_views=max_episode_views
         self.visibility_contexts=[];self.visibility_context=None
@@ -106,6 +111,11 @@ class GroundedMonitor(GraphFeedbackMonitor):
         return list(sources)
 
     def capture(self):
+        start=time.monotonic()
+        try:return self._capture()
+        finally:self.timing['public_observation_seconds']+=time.monotonic()-start
+
+    def _capture(self):
         state=public_observation(self.observe())
         self.current_public_state=state
         self.last_public={k:np.asarray(v).tolist() for k,v in state.items() if not isinstance(v,dict)}
@@ -175,12 +185,17 @@ class GroundedMonitor(GraphFeedbackMonitor):
         # The trusted boundary authorizes only this invocation and its bounded
         # local continuations. No old PASS can authorize a later actor/API.
         self.active_authorization=None;self.active_precondition=None
+        start=time.monotonic();before=dict(self.timing)
+        self.contract_calls[name]=self.contract_calls.get(name,0)+1
         try:return super().invoke(name,args,kwargs,fn)
         except ExecutionInterrupted:
             if self.mode=='G1' and not self.graph_options['selective_recovery']:
                 self.graph.invalidate(self.roots,'ablation_conservative_recovery_suffix',conservative=True)
             raise
-        finally:self.active_authorization=None;self.active_precondition=None
+        finally:
+            self.active_authorization=None;self.active_precondition=None;self.release_permission=None
+            nested=sum(self.timing[k]-before[k] for k in ('public_observation_seconds','control_seconds','perception_api_seconds'))
+            self.timing['monitor_dispatch_seconds']+=max(0.,time.monotonic()-start-nested)
 
     def _require_current_grasp(self,operation):
         # Public finger encoders can refute an existing grasp before a command.
@@ -219,6 +234,12 @@ class GroundedMonitor(GraphFeedbackMonitor):
 
     def _tracked(self,fn):
         def physical(name,args,kwargs):
+            start=time.monotonic()
+            try:return physical_impl(name,args,kwargs)
+            finally:
+                key='control_seconds' if name in ('goto_pose','open_gripper','close_gripper','home_pose') else 'perception_api_seconds'
+                self.timing[key]+=time.monotonic()-start
+        def physical_impl(name,args,kwargs):
             # A trusted counter is sampled at the complete API boundary. Equal
             # successful-solve counts prove even a multi-segment goto rejected
             # its first solver before any segment could move. A later segment's
@@ -256,12 +277,25 @@ class GroundedMonitor(GraphFeedbackMonitor):
             # explains its authorized boundary without replaying that boundary.
             self.capture()
             self._require_current_grasp(name)
-            self._check_active_dependencies()
+            self._check_active_dependencies(args if name=='goto_pose' else None)
+            if name=='open_gripper' and self.closed:
+                # Immutable authorization describes history. Current permission
+                # must survive the LAST observation, then be verified afresh.
+                gate=self.release_permission
+                if not gate or not self.graph.nodes[gate]['valid']:
+                    self._stop('release_permission_expired_after_final_observation',
+                        [gate] if gate else [],metrics={'recoverable':True})
+                check=self._release_evidence(self.last_place)
+                if check['status']!='PASS':
+                    self._stop('release_final_evidence_'+check['reason'],metrics={'recoverable':True})
+                self._require_current_grasp(name)
+                self.release_permission=self.last_check
+                self._valid(self.release_permission)
             self.record('L2','phase_precondition','PASS','authorized_current_boundary',
                 {'api':name,'phase':self.phase,'closed':self.closed,'lifted':self.lifted,
                  'held_object':self.held_object,'grasp_epoch':self.grasp_epoch,
                  'historical_facts_are_not_permission':True},
-                graph_parents=[self.active_authorization]+list(self.skill_facts.values()))
+                graph_parents=[self.active_authorization]+list(self.skill_facts.values())+([self.release_permission] if name=='open_gripper' and self.closed else []))
             self.active_precondition=self.last_check
             try:
                 if self.active_dependencies is not None:self.active_dependencies['started']=True
@@ -269,7 +303,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
             finally:self.active_precondition=None
         return call
 
-    def _check_active_dependencies(self):
+    def _check_active_dependencies(self,motion=None):
         """Revalidate a multi-call skill before every actual physical API boundary.
 
         Own returned motion expires robot/held estimates. It does not authorize a
@@ -278,7 +312,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
         contract=self.active_dependencies
         if contract is None:return
         plan_id=self.active_plan
-        changed=[]
+        changed=[];missing=[];conditional=[]
         for source in contract['sources']:
             node=self.graph.nodes[source];key=node.get('key')
             if key and self.graph.latest.get(key)!=source:changed.append(source)
@@ -289,6 +323,21 @@ class GroundedMonitor(GraphFeedbackMonitor):
             current=self._surface(name);geom=self.geometry.get(name)
             if not reliable_top(current,geom):
                 current=current_support(self.colored_points.get(name,np.empty((0,3))),self.table_z,geom,camera_origin=self._current_camera_origin())
+            if current is None:
+                # A partial current view can only support a clear, non-descending
+                # transit under explicit static-support assumptions. It is never
+                # fresh localization or permission to descend/release.
+                held=self._held_surface() if motion is not None else None
+                tcp=np.asarray(self.last_public['robot_cartesian_pos'])
+                target=np.asarray(motion[0]) if motion is not None else None
+                clear=(held is not None and target is not None
+                    and min(float(held['lo'][2]),float(held['lo'][2]+target[2]-tcp[2]))
+                        >=float(reference['hi'][2])+.05
+                    and target[2]>=tcp[2]-.002)
+                allowed=(contract.get('stage') in ('ascend','above_target') and clear
+                    and retained_consistent(self.colored_points.get(name,np.empty((0,3))),reference,geom))
+                if allowed:conditional.append(name)
+                else:missing.append(name)
             if current and (np.linalg.norm(np.asarray(current['center'])[:2]-np.asarray(reference['center'])[:2])>.008
                             or abs(float(current['hi'][2])-float(reference['hi'][2]))>.006):
                 changed.extend(contract['external_sources'].get(name,[]))
@@ -299,9 +348,19 @@ class GroundedMonitor(GraphFeedbackMonitor):
                 {'plan_id':plan_id,'changed_sources':changed,'already_started':contract['started'],
                  'completed_calls':list(self.call_history)},action='replan',graph_parents=changed)
             self._stop('active_skill_external_dependency_changed',[plan_id,self.last_check]+changed)
+        policy='conditional_history_clear_transit' if conditional else 'current_localization'
         self.graph._event('active_dependency_revalidation',plan_id=plan_id,
             source_ids=contract['sources'],expected_external_epochs=contract['external_epochs'],
-            started=contract['started'],status='PASS')
+            started=contract['started'],stage=contract.get('stage'),
+            status='UNCERTAIN' if missing else 'PASS',evidence_policy=policy,
+            missing_objects=missing,conditional_objects=conditional,
+            independent_verification=False)
+        if missing:
+            self.record('L2','active_dependencies','UNCERTAIN','current_support_evidence_required',
+                {'plan_id':plan_id,'stage':contract.get('stage'),'missing_objects':missing},action='reobserve')
+            self._stop('current_support_evidence_required',[plan_id,self.last_check],
+                metrics={'recoverable':True,'missing_surface_object':missing[0],
+                         'next_action':'acquire_support_evidence_then_new_place_plan'})
 
     def _stop(self,reason,roots=(),incomplete=False,metrics=None):
         # Preserve the actual failed check as a causal root before adding L3.
@@ -788,6 +847,8 @@ class GroundedMonitor(GraphFeedbackMonitor):
             if self.last_public['robot_cartesian_pos'][7]<.05:
                 self._grasp_lost('slipped_or_empty_during_precise_place')
         def emit(event):
+            if self.active_dependencies is not None and event['check']=='precise_tcp_command':
+                self.active_dependencies['stage']=event['stage']
             self.record('L1',event['check'],event['status'],event['reason'],
                 {k:v for k,v in event.items() if k not in ('schema','layer','check','status','reason')})
             if event['check']=='precise_tcp_pre_descent' and self.active_plan:
@@ -848,6 +909,8 @@ class GroundedMonitor(GraphFeedbackMonitor):
         return {'status':'PASS','evidence_id':self.last_check}
 
     def _run(self,plan_id,fn):
+        history=self.graph.nodes.get(plan_id)
+        if history and history['kind']=='plan':self.skill_intent=copy.deepcopy(history['data'])
         node=self._valid(plan_id)
         if node['kind']!='plan' or plan_id in self.consumed:self._stop('completed_or_nonplan_cannot_execute',[plan_id])
         d=node['data'];skill=d['skill']
@@ -922,6 +985,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
                 self.last_place=copy.deepcopy(d)
             elif skill=='retreat':
                 self.phase='ready';self.retreat_completed=True;self.released=False;self.approached_object=None;self.held_object=None
+            self.graph._event('skill_returned',plan_id=plan_id,skill=skill,call_id=self.last_call,phase=self.phase)
             return {'plan_id':plan_id,'status':'returned','call_id':self.last_call}
         except ExecutionInterrupted as exc:
             if (skill=='table_place' and str(exc)=='pre_motion_rejected'
@@ -944,6 +1008,40 @@ class GroundedMonitor(GraphFeedbackMonitor):
             raise
         finally:self.active_plan=None;self.active_dependencies=None
 
+    def _release_evidence(self,target,held=None):
+        table_gate=None
+        if target['skill']=='table_place':
+            # Table validation captures again. All held/release evidence must
+            # use that newer frame, never a held estimate from before it.
+            self._current_table_check(target['inputs']['table_region'])
+            table_gate=self.last_check;held=self._held_surface()
+        if held is None:held=self._held_surface()
+        held_parents=[self.last_observation]
+        if self.geometry_ids.get(self.held_object):held_parents.append(self.geometry_ids[self.held_object])
+        if self.attachment_id:held_parents.append(self.attachment_id)
+        if held and held.get('attachment_check_id'):held_parents.append(held['attachment_check_id'])
+        elif self.attachment is not None and self.last_check:held_parents.append(self.last_check)
+        # These are THIS release attempt's public estimates, not the old
+        # target inputs whose poses were invalidated by the place motion.
+        held_evidence=self.graph.add('estimate',{'type':'surface','object':self.held_object,
+            'evidence_role':'pre_release_held','surface':copy.deepcopy(held),
+            'object_epoch':self.object_epochs[self.held_object]},parents=list(dict.fromkeys(held_parents)))
+        if target['skill']=='table_place':
+            region=self.graph.nodes[target['inputs']['table_region']]['data'];support={'center':region['center'],'hi':[0,0,region['top_z']]}
+            support_name='observed_table_region'
+            support_parents=[self.last_observation,target['inputs']['table_region'],table_gate]
+        else:
+            support_name=self.graph.nodes[target['inputs']['support_surface']]['data']['object'];support=self._support_surface(support_name,allow_retained=False)
+            support_parents=[self.last_observation]
+            if self.geometry_ids.get(support_name):support_parents.append(self.geometry_ids[support_name])
+        support_evidence=self.graph.add('estimate',{'type':'surface','object':support_name,
+            'evidence_role':'pre_release_support','surface':copy.deepcopy(support),
+            'current_observation_only':True},parents=list(dict.fromkeys(support_parents)))
+        check=place_metrics(held,support,self.geometry.get(self.held_object))
+        self.record('L2','pre_release',check['status'],check['reason'],check,
+            action='release' if check['status']=='PASS' else 'align',graph_parents=[held_evidence,support_evidence])
+        return check
+
     def _release(self,fn):
         reason=('lift_task_requires_keep_holding' if self.task=='lift' else
                 'verified_place_required_before_release' if self.phase!='holding_verified' or self.last_place is None else None)
@@ -951,33 +1049,10 @@ class GroundedMonitor(GraphFeedbackMonitor):
         target=self.last_place
         for attempt in range(self.max_local+1):
             self.capture();held=self._held_surface()
-            held_parents=[self.last_observation]
-            if self.geometry_ids.get(self.held_object):held_parents.append(self.geometry_ids[self.held_object])
-            if self.attachment_id:held_parents.append(self.attachment_id)
-            if held and held.get('attachment_check_id'):held_parents.append(held['attachment_check_id'])
-            elif self.attachment is not None and self.last_check:held_parents.append(self.last_check)
-            # These are THIS release attempt's public estimates, not the old
-            # target inputs whose poses were invalidated by the place motion.
-            held_evidence=self.graph.add('estimate',{'type':'surface','object':self.held_object,
-                'evidence_role':'pre_release_held','surface':copy.deepcopy(held),
-                'object_epoch':self.object_epochs[self.held_object]},parents=list(dict.fromkeys(held_parents)))
-            if target['skill']=='table_place':
-                self._current_table_check(target['inputs']['table_region'])
-                region=self.graph.nodes[target['inputs']['table_region']]['data'];support={'center':region['center'],'hi':[0,0,region['top_z']]}
-                support_name='observed_table_region'
-                support_parents=[self.last_observation,target['inputs']['table_region'],self.last_check]
-            else:
-                support_name=self.graph.nodes[target['inputs']['support_surface']]['data']['object'];support=self._support_surface(support_name,allow_retained=False)
-                support_parents=[self.last_observation]
-                if self.geometry_ids.get(support_name):support_parents.append(self.geometry_ids[support_name])
-            support_evidence=self.graph.add('estimate',{'type':'surface','object':support_name,
-                'evidence_role':'pre_release_support','surface':copy.deepcopy(support),
-                'current_observation_only':True},parents=list(dict.fromkeys(support_parents)))
-            check=place_metrics(held,support,self.geometry.get(self.held_object))
-            self.record('L2','pre_release',check['status'],check['reason'],check,
-                action='release' if check['status']=='PASS' else 'align',graph_parents=[held_evidence,support_evidence])
+            check=self._release_evidence(target,held)
             if check['status']=='PASS':
                 release_gate=self.last_check;self._valid(release_gate)
+                self.release_permission=release_gate
                 self.active_authorization=self.graph.add('verification_fact',{
                     'historical_only':True,'type':'boundary_release_authorization',
                     'source_check_id':release_gate,'block':self.block},

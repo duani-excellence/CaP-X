@@ -1,6 +1,6 @@
 # 图驱动执行反馈：开发与正式评测入口
 
-正式项目目录为 `/home/hanyu/dqb/cap-x-20261106`。此版本复用原有父进程 API broker、Bubblewrap actor、DeepSeek Provider、Snapshot 与独立物理评分。当前为开发验收阶段；2026-11-22 V18 的 Stack/Lift 新开发场景三组真实推理已通过，Restack 的 G0/G1 正在 V19 几何来源修复后的真实验收，正式 1,800 episode 测试尚未开始；不得把手写 Oracle 或开发集结果当作正式模型效果。
+正式项目目录为 `/home/hanyu/dqb/cap-x-20261106`。此版本复用原有父进程 API broker、Bubblewrap actor、DeepSeek Provider、Snapshot 与独立物理评分。当前为 V21.3 开发验收阶段，DeepSeek 已恢复并完成新在线请求。V20 的 360 个 episode 已结束（包含 API 失败）；历史程序重放、新生成在线验收及不同版本结果分别报告。正式 1,800 episode 测试尚未开始，开发结果不能替代正式效果证据。最新状态见 [在线验收报告](../reports/graph-feedback-v21-online-resume-2026-11-22.md)。
 
 ## 三个系统
 
@@ -12,7 +12,7 @@
 
 G0/G1 共享初始 DeepSeek 程序、任务指令、Snapshot 和预算。后续恢复请求独立生成并记录。所有组沿用原物理成功判据；模型 FINISH、受控停止和验证器 PASS 都不能替代物理任务成功。B0 使用自己的合法原接口，故 G1−B0 表示完整系统差异，不能单独归因于图。
 
-支持 Stack、Lift、Restack 三种视觉任务；任务数不把 Seed、模式和改写重复计算。感知使用已有 SAM3、带 Seed 的 GraspNet 和 RGB-D，运动使用既有 PyRoKi；在线监控不接收仿真物体真值。独立物理状态只写入父进程离线诊断产物。
+已接入 Stack、Lift、Restack 三种视觉任务，实际验收状态以最新报告为准；接入不等于任务通过。任务数不把 Seed、模式和改写重复计算。感知使用已有 SAM3、带 Seed 的 GraspNet 和 RGB-D，运动使用既有 PyRoKi；在线监控不接收仿真物体真值。独立物理状态只写入父进程离线诊断产物。
 
 ## 统一命令
 
@@ -188,4 +188,73 @@ V17共同底座还将被阻断的桌面位置登记为搜索历史，重新选�
 
 V20在技能入口及每次真实物理API前检查当前公开夹爪状态。已确认空夹爪会阻断尚未执行的动作，清除当前抓持身份并保留历史与预算；缺失夹爪证据要求重新读取。正常夹爪开度本身不构成抓持成功证据，既有几何与共动验证仍然必需。此共同修复同时用于G0/G1。
 
-V20固定开发批次已启动，目录`outputs/model_comparison/graph_final_v20_20261122/development`，60个新Snapshot已验收，计划120个unit/360个episodes。只读进度命令：`bash scripts/local/graph_experiment.sh status --campaign outputs/model_comparison/graph_final_v20_20261122/development`。有运行中的runner时不要同时resume。正式1800个episodes尚未启动。详情见`../reports/graph-feedback-v20-development-2026-11-22.md`。
+V20固定开发批次已完成，目录`outputs/model_comparison/graph_final_v20_20261122/development`，60个新Snapshot已验收，120个unit/360个episodes均已结束，包含API失败，不能视作360次有效控制实验。只读进度命令：`bash scripts/local/graph_experiment.sh status --campaign outputs/model_comparison/graph_final_v20_20261122/development`。有运行中的runner时不要同时resume。正式1800个episodes尚未启动。详情见`../reports/graph-feedback-v20-development-2026-11-22.md`。
+
+## V21 动作准入与有界恢复
+
+以下保留V21.1的机制说明，当前V21.3另包含桌面恢复、原生horizon终止与响应审计修复；以每次运行源码归档为准。历史 V20 结果、V21 首次失败、V21.1 复跑分开保存。当天早期请求曾返回HTTP402，此后已恢复真实API验收；下述历史程序重放仍不得当作新模型闭环验收，正式评测仍未就绪。详见 [验收报告](../reports/graph-feedback-v21-2026-11-22.md)。
+
+共同底座修复：历史 `verification_fact` 只是授权发生过的记录。释放前最后观测后，原许可必须仍有效，并用当前持物/支撑重新验证；桌面验证内部再次捕获的画面也必须同步到持物证据。多段 place 的来源更新立即阻断后缀；完全缺少支撑证据记 UNCERTAIN。仅有与历史一致的部分可见点时，只有 ascend/above_target 阶段、当前与目标持物底面均高于支撑至少 50mm、非下降运动可以条件性继续。下降/释放不能使用该历史许可。这是静态支撑假设下的启发式边界检查，不是动态避碰或独立传感器验证。
+
+`GroundedRecovery` 复用既有技能并生成下一 actor 的完整代码，仍经 Sandbox、broker、相同验证器和预算执行。支持支撑更新后重新放置、释放后新撤退、抓持验证、抓持丢失后重建场景与受约束重抓。动作次序由显式技能配方决定；图只决定证据和重算范围。G0 重新取得未执行后缀所需来源；G1 只复用具有正确版本键、坐标系、当前 epoch 且有效的 API 观测句柄，释放检查摘要不属于可复用句柄。已完成调用保留为事实，新计划有新 ID；未知物理效果不自动恢复。
+
+配置 `env_configs/graph_feedback/development-v21-3.json` 的 budgets 新增：
+
+- `bounded_recovery: true`：G0/G1 共同开启；设为 false 保留原 LLM 多轮恢复路径。
+- `max_recovery_plans: 6`、`max_recovery_no_progress: 2`：每 episode 自动恢复配方上限、同一阶段/对象无进展上限。每份配方预留一次既有 local attempt，不能跨 actor 刷新额度。
+- 原有 16 代码块、192 实际 API、24 局部尝试、8 视角、2400 秒、32768 输出 Token 不变。超出覆盖范围才进入原 DeepSeek 恢复入口，仍受原全局/episode 上限约束。
+
+`bounded_recovery_events` 分别记录保留/选择来源和新计划**实际使用并返回**的来源；未执行计划不计复用收益。`contract_calls`、原 `actual_api_calls`、观测 NPZ 数、工具日志、`component_timing` 用于区分获取证据、控制、监控与 LLM 成本。`avoided_acquisition_apis` 是相对同配方重新获取的反事实读数，最终节省量仍用配对实测核对。工具服务时间是嵌套耗时，不可和控制/监控桶重复相加；历史程序重放的 `llm_seconds` 含原初始生成的配对预算时间，不是本轮 API 耗时。
+
+当前真实模型恢复验收（DeepSeek已恢复；使用V21.3与新目录，防止覆盖）：
+
+```bash
+cd /home/hanyu/dqb/cap-x-20261106
+bash scripts/local/graph_experiment.sh pair \
+  --config env_configs/graph_feedback/development-v21-3.json \
+  --task stack --seed 953265258 --groups B0 G0 G1 \
+  --snapshot outputs/model_comparison/graph_final_v20_20261122/development-snapshots/scenes/stack-953265258/prepared-snapshot.json \
+  --output "outputs/model_comparison/graph_v21_smoke_$(date +%Y%m%d_%H%M%S)"
+```
+
+零新增模型调用的诊断命令（历史 DeepSeek 初始程序 + **真实在线** Vision，局部恢复无法处理时退出，不查询 LLM）：
+
+```bash
+cd /home/hanyu/dqb/cap-x-20261106
+source scripts/local/common.sh
+PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+.venv/bin/python -B scripts/local/replay_graph_initial.py \
+  --config env_configs/graph_feedback/development-v21-3.json \
+  --source-unit outputs/model_comparison/graph_final_v20_20261122/development/units/7ec0118521e1e2a5ea2c \
+  --snapshot outputs/model_comparison/graph_final_v20_20261122/development-snapshots/scenes/stack-953265258/prepared-snapshot.json \
+  --fault support_refresh \
+  --output "outputs/reproduction/graph_v21_diagnostic_$(date +%Y%m%d_%H%M%S)"
+```
+
+`--fault` 可选 none/support_refresh/missing_baseline/target_shift。输出 `provenance.json` 标注历史模型来源；校验原响应、代码 hash、HTTP 200 凭据以及配对 Prompt/API/Snapshot hash。该入口不生成正式 campaign、不能代替新模型重复。
+
+通过真实小规模验收后，复用既有固定开发分配与 60 个 Snapshot，而非重新抽取 Seed。以下仅准备新版本开发冻结，不会调用模型；正式规模仍由新开发结果决定：
+
+```bash
+cd /home/hanyu/dqb/cap-x-20261106
+source scripts/local/common.sh
+DEV="outputs/model_comparison/graph_v21_dev_$(date +%Y%m%d_%H%M%S)"
+.venv/bin/python -B - "$DEV" <<'PY'
+import json,sys
+from pathlib import Path
+from capx.experiments.graph_campaign import freeze_campaign,validate_development_services
+c=json.loads(Path('env_configs/graph_feedback/development-v21-3.json').read_text())
+old=Path('outputs/model_comparison/graph_final_v20_20261122')
+c['snapshot_manifest']=str((old/'development-snapshots/scenes.json').resolve())
+plan=json.loads((old/'allocation.json').read_text())
+validate_development_services(c)
+freeze_campaign(Path(sys.argv[1]),c,plan,phase='development')
+PY
+# 恢复 API 后，按完整配对 unit 续跑；首次先验收两个 unit
+bash scripts/local/graph_experiment.sh run --campaign "$DEV" --max-units 2
+bash scripts/local/graph_experiment.sh resume --campaign "$DEV"
+```
+
+正式效果与图机制消融继续使用本文既有 freeze/export-initials/contrast 流程，不能将 V20 初始来源清单当作 V21 正式共享来源；版本、共同底座及预算校验保持不变。
+
+本轮恢复验收范围必须区分：正常完成、支撑版本更新、目标偏移、缺失基线有历史模型程序＋真实 Vision 诊断；抓持丢失后的重抓，以及单独“已释放但撤退过期”目前只有软件/Mock 回归，尚不能声明在线物理恢复已验收。所有新生成和 LLM 重新规划都需要 DeepSeek 402 解除后继续验证。

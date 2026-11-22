@@ -6,13 +6,13 @@ from capx.execution.grounded_feedback import GroundedMonitor
 from capx.execution.sandbox import ExecutionInterrupted
 
 
-def fixture():
+def fixture(mode="G1"):
     state={'robot_cartesian_pos':np.array([.5,0,.14,0,0,1,0,.5]),'robot_joint_pos':np.zeros(8)}
     surfaces={'red':{'center':[.5,0,.02],'lo':[.48,-.02,0.],'hi':[.52,.02,.04]},
               'green':{'center':[.65,0,.025],'lo':[.625,-.025,0.],'hi':[.675,.025,.05]}}
     for value in surfaces.values():
         value.update(top_xy_bounds=[value['lo'][:2].copy(),value['hi'][:2].copy()],top_pixels=400,pixels=600)
-    m=GroundedMonitor('G1','stack',lambda:state)
+    m=GroundedMonitor(mode,'stack',lambda:state)
     m.geometry_fn=lambda obs:(surfaces,0.,np.empty((0,3)))
     m.closed=True;m.lifted=True;m.phase='holding_verified';m.held_object='red cube';m.close_tcp_z=.02
     m.geometry['red cube']={'height_m':.04,'orientation_verified':True}

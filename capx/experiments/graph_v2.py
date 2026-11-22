@@ -25,7 +25,7 @@ CONDITIONS={
     'restack':'Green cube initially rests on red cube. Move green to a clear table region and release/retreat first, then stack red onto green, release, and retreat.',
 }
 SOURCES=('capx/experiments/graph_v2.py','capx/experiments/vision_tasks.py',
-         'capx/execution/grounded_feedback.py','capx/execution/grounded_targets.py','capx/execution/public_geometry.py',
+         'capx/execution/grounded_feedback.py','capx/execution/grounded_recovery.py','capx/execution/grounded_targets.py','capx/execution/public_geometry.py',
          'capx/execution/graph_feedback.py','capx/execution/dependency_graph.py','capx/execution/feedback.py',
          'capx/execution/sandbox.py','capx/execution/actor.py','capx/envs/tasks/audited_stack.py',
          'capx/envs/physical_evaluation.py','capx/multitask/runtime.py','capx/experiments/graph_feedback.py',
@@ -134,6 +134,9 @@ def configure_services(config):
 def limits(config):
     b=dict(max_blocks=6,api_budget=128,max_local=3,max_episode_local=8,max_episode_views=2,block_seconds=90,episode_seconds=1800)
     b.update(config.get('budgets',{}))
+    if type(b.get('bounded_recovery',False)) is not bool:raise ValueError('bounded_recovery must be boolean')
+    for key in ('max_recovery_plans','max_recovery_no_progress'):
+        if key in b and (type(b[key]) is not int or b[key]<1):raise ValueError('Invalid recovery budget '+key)
     for key in ('max_blocks','api_budget','block_seconds','episode_seconds'):
         if not isinstance(b[key],(int,float)) or b[key]<=0:raise ValueError('Invalid budget '+key)
     for key in ('max_local','max_episode_local'):
@@ -327,10 +330,28 @@ def receipt_summary(paths):
     return total
 
 
+def simulator_termination(env):
+    """Trusted runtime lifecycle only, never task truth or actor error text.
+
+    Reset settling advances the native horizon before the wrapper zeroes its
+    counter. That counter can lag a terminated simulator indefinitely.
+    """
+    low=getattr(env,'low_level_env',None)
+    native=getattr(low,'robosuite_env',None)
+    if getattr(native,'done',False) is not True:return None
+    return dict(terminated=True,source='native_simulator_lifecycle',
+        timestep=getattr(native,'timestep',None),horizon=getattr(native,'horizon',None),
+        wrapper_steps=getattr(low,'_sim_step_count',None),wrapper_limit=getattr(low,'max_steps',None))
+
+
 def run_episode(output,task,seed,repeat,snapshot,config,budget,group,initial=None,*,fault='none',source_hashes=None):
     from capx.experiments.graph_feedback import check_pair,parse_graph_recovery,graph_recovery_prompt
     dest=Path(output)/'episodes'/group;dest.mkdir(parents=True,exist_ok=False)
     b=limits(config);b['graph_options']=graph_options(config,group);start=time.monotonic();request_start=budget.count
+    recovery=None;active_recipe=None;llm_seconds=0.
+    if group!='B0' and b.get('bounded_recovery',False):
+        from capx.execution.grounded_recovery import GroundedRecovery
+        recovery=GroundedRecovery(max_attempts=b.get('max_recovery_plans',6),max_no_progress=b.get('max_recovery_no_progress',2))
     # A shared request saves real billing/wall time, not policy time for the
     # second arm. Charge the same initial latency before its recovery budget.
     shared_initial_seconds=float(initial.get('generation_seconds',0)) if initial else 0.
@@ -384,6 +405,7 @@ def run_episode(output,task,seed,repeat,snapshot,config,budget,group,initial=Non
             try:
                 answer,source,elapsed=query(budget,prompt,f'initial-{task}-seed-{seed}-repeat-{repeat}-'+('B0' if group=='B0' else 'shared-G0-G1'),episode_deadline)
                 initial.update(response=answer,request=source,generation_seconds=elapsed)
+                llm_seconds+=elapsed
                 initial['code']=validated_program(answer)
             except (ValueError,SyntaxError) as exc:initial.update(code_error=type(exc).__name__+': '+str(exc),error_status='invalid_program')
             except Exception as exc:initial.update(code_error=type(exc).__name__,error_status=exception_status(exc))
@@ -403,16 +425,34 @@ def run_episode(output,task,seed,repeat,snapshot,config,budget,group,initial=Non
                 if remaining<=0:result.update(status='budget_exceeded',stop_reason='episode_or_global_wall_budget');break
                 if env._api_calls>=b['api_budget']:result.update(status='budget_exceeded',stop_reason='episode_api_budget');break
                 env.cfg.execution_timeout=min(b['block_seconds'],remaining)
-                save(dest/f'block-{block}.json',dict(code=code,code_hash=digest(code),model_request=source,block=block))
+                save(dest/f'block-{block}.json',dict(code=code,code_hash=digest(code),model_request=source,block=block,code_origin='bounded_skill_recipe' if active_recipe else 'deepseek',recovery_id=active_recipe))
                 env._actor.close()
                 if monitor:monitor.begin_program(code,block)
                 # Independent private diagnostics. These objects never enter prompts/monitor.
                 before_physics=env.evaluation_state()
                 step_start=time.monotonic();result['executed']=True;result['current_block']=block
-                obs,reward,done,truncated,info=env.step(code)
+                try:
+                    obs,reward,done,truncated,info=env.step(code)
+                except Exception as exc:
+                    lifecycle=simulator_termination(env)
+                    if lifecycle is None:raise
+                    env._write('runtime_termination',**lifecycle)
+                    result.update(status='truncated',truncated=True,policy_success=False,
+                        stop_reason='simulator_episode_terminated',runtime_termination=lifecycle,
+                        error=type(exc).__name__,reward_is_last_completed_evaluation=True)
+                    result['blocks'].append(dict(block=block,seconds=time.monotonic()-step_start,
+                        execution_status='simulator_terminated',reward=None,api_calls=env._api_calls,
+                        model_request=source,policy_success=False))
+                    break
+                lifecycle=simulator_termination(env)
+                if lifecycle is not None:
+                    truncated=True
+                    result['runtime_termination']=lifecycle
+                    env._write('runtime_termination',**lifecycle)
                 result.update(reward=reward,info=info,truncated=truncated,policy_success=False,status=info['execution_status'] if info['execution_status']!='ok' else 'task_failure')
                 save(dest/f'block-{block}-evaluation.json',dict(block=block,before=before_physics,after=env.evaluation_state(),
                     phase=getattr(monitor,'phase',None),held_object=getattr(monitor,'held_object',None)))
+                if recovery:recovery.complete(monitor,info['execution_status'])
                 if monitor and info['execution_status'] in ('runtime_error','invalid_program','policy_violation'):
                     monitor.end_block_failure(info['execution_status'],info.get('stderr',''))
                 check=monitor.finish_check() if monitor and not truncated else None
@@ -433,8 +473,8 @@ def run_episode(output,task,seed,repeat,snapshot,config,budget,group,initial=Non
                     policy_elapsed_seconds=time.monotonic()-start+shared_initial_seconds)
                 result['blocks'][-1]['policy_success']=result['policy_success']
                 if truncated:
-                    if info['execution_status']=='ok':result['status']='truncated'
-                    result['stop_reason']='environment_timeout_or_truncation';break
+                    if info['execution_status']=='ok' or lifecycle is not None:result['status']='truncated'
+                    result['stop_reason']='simulator_episode_terminated' if lifecycle is not None else 'environment_timeout_or_truncation';break
                 if terminal:
                     result.update(status='budget_exceeded' if 'budget' in terminal else 'controlled_exit',stop_reason=terminal);break
                 if not checks['within_wall_budget']:
@@ -448,6 +488,13 @@ def run_episode(output,task,seed,repeat,snapshot,config,budget,group,initial=Non
                 if block+1>=b['max_blocks']:result['stop_reason']='episode_code_block_budget';break
                 if env._api_calls>=b['api_budget']:result['stop_reason']='episode_api_budget';break
                 if time.monotonic()>=episode_deadline or budget.count>=budget.max_requests:result['stop_reason']='global_model_or_episode_wall_budget';break
+                if recovery:
+                    recipe=recovery.propose(monitor,execution_status=info['execution_status'])
+                    if recipe:
+                        save(dest/f'bounded-recovery-{block+1}.json',recipe)
+                        code=recipe['code'];source=None;active_recipe=recipe['id']
+                        continue
+                active_recipe=None
                 if group=='B0':
                     prompt=b0_recovery_prompt(base,obs,code,info)
                     context={'feedback_type':'original_program_console','stdout':info.get('stdout',''),'stderr':info.get('stderr','')}
@@ -462,7 +509,8 @@ def run_episode(output,task,seed,repeat,snapshot,config,budget,group,initial=Non
                 result['replans']+=1
                 replan_request_start=budget.count
                 try:
-                    answer,source,_=query(budget,prompt,f'replan-{task}-{group}-seed-{seed}-repeat-{repeat}-block-{block+1}',episode_deadline)
+                    answer,source,elapsed=query(budget,prompt,f'replan-{task}-{group}-seed-{seed}-repeat-{repeat}-block-{block+1}',episode_deadline)
+                    llm_seconds+=elapsed
                 finally:result['replan_llm_requests']+=budget.count-replan_request_start
                 result['request_paths'].append(source)
                 if answer.get('finish_reason')!='stop' or answer.get('response_model')!=config.get('model','deepseek-v4-pro'):raise ValueError('Incomplete or wrong-model recovery response')
@@ -489,7 +537,14 @@ def run_episode(output,task,seed,repeat,snapshot,config,budget,group,initial=Non
     except Exception as exc:
         result.update(status=exception_status(exc),policy_success=False,error=type(exc).__name__,stop_reason=result['stop_reason'] or ('resource_budget_exhausted' if exception_status(exc)=='budget_exceeded' else 'frozen_source_drift' if isinstance(exc,SourceChangedError) else 'infrastructure_or_runtime_error'))
     finally:
+        if recovery:
+            # Includes interrupted final recipes; never label partial calls done.
+            if recovery.pending:recovery.complete(monitor,result['status'])
+            result['bounded_recovery_events']=recovery.events
         if monitor:
+            result['component_timing']={**getattr(monitor,'timing',{}),'llm_seconds':llm_seconds+shared_initial_seconds,
+                'note':'control includes IK; public observation includes RGB-D/render/geometry/storage; monitor is exclusive dispatch overhead; tool service timing is nested, not additive'}
+            result['contract_calls']=getattr(monitor,'contract_calls',{})
             result.update(local_recoveries=monitor.recoveries,local_attempts=monitor.local_attempts,feedback_events=monitor.events,
                 graph_events=monitor.graph.events,fault_fired=monitor.fault_fired,phase=monitor.phase,
                 detection={'unknown':len(monitor.events)})
