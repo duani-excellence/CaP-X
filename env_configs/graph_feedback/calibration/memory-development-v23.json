@@ -1,0 +1,35 @@
+{
+  "schema": "capx.memory_bounds.v1",
+  "calibration_id": "3978d5c705e66ded38e9b3afebab90224a7155045d1824b06c125afa2b59ef6f",
+  "validated": true,
+  "validation_kind": "archived_development_empirical_envelope_NOT_heldout_guarantee",
+  "frame": "robot_base",
+  "xy_m": 0.0029066442720048686,
+  "z_m": 0.0025706393124395937,
+  "height_m": 0.002875098629889674,
+  "translation_rate": 0.01,
+  "rotation_rate": 0.01,
+  "age_rate": 0.0001,
+  "static_rate": 0.0001,
+  "max_age_seconds": 10.0,
+  "max_travel_m": 0.35,
+  "max_rotation_rad": 0.4,
+  "scope": "same public upright cube estimator, renderer and robot calibration; short noncontact rigid transport only",
+  "evidence": [
+    {
+      "path": "/home/hanyu/dqb/cap-x-20261106/outputs/model_comparison/graph_v22_20261122_180352/online-v22-1/normal-stack/episodes/G0/trace/20a73aeed5194be79fe1b5c36baf1c58/trace.jsonl",
+      "sha256": "0c7d854de52dd603493e61207b07bedcaf06b3b1c218c4863aaa89508a0a8fe5"
+    },
+    {
+      "path": "/home/hanyu/dqb/cap-x-20261106/outputs/model_comparison/graph_v22_20261122_180352/online-v22-1/normal-lift/episodes/G0/trace/8d47a7ef3eab44d4a6fcaa7c96d75871/trace.jsonl",
+      "sha256": "584cab0f68b7563df09fdbbaaa189895e296951ade11fb1639171c138235e47e"
+    },
+    {
+      "path": "/home/hanyu/dqb/cap-x-20261106/outputs/model_comparison/graph_v22_20261122_180352/online-v22-2/normal-restack/episodes/G1/trace/83f24789c77645b9a21a62f53fe888cb/trace.jsonl",
+      "sha256": "70662935ab069d34d6b62eba760345f90ba38462fb002c16b74f4454d2b247cf"
+    }
+  ],
+  "rate_policy": "conservative engineering growth allowance, NOT fitted probability",
+  "estimator_policy": "identifiable_current_faces_only",
+  "external_disturbance_policy": "contradiction/touch/slip/loss invalidates; arbitrary hidden disturbance not covered"
+}

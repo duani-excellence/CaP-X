@@ -1,0 +1,212 @@
+{
+  "tasks": [
+    "stack",
+    "lift",
+    "restack"
+  ],
+  "model": "deepseek-v4-pro",
+  "groups": [
+    "G0",
+    "G1"
+  ],
+  "faults": [
+    "none"
+  ],
+  "services": {
+    "sam3": "http://127.0.0.1:18114",
+    "graspnet": "http://127.0.0.1:8215",
+    "pyroki": "http://127.0.0.1:41337"
+  },
+  "budgets": {
+    "max_requests": 32,
+    "cost_limit_usd": 5.0,
+    "wall_seconds": 14400,
+    "max_tokens": 32768,
+    "reasoning_effort": "low",
+    "request_timeout": 400,
+    "max_blocks": 16,
+    "api_budget": 192,
+    "block_seconds": 90,
+    "episode_seconds": 2400,
+    "max_local": 6,
+    "max_episode_local": 24,
+    "max_episode_views": 8,
+    "bounded_recovery": true,
+    "max_recovery_plans": 6,
+    "max_recovery_no_progress": 2,
+    "task_conditions": true,
+    "generic_goals": true,
+    "memory_profile": {
+      "schema": "capx.memory_bounds.v1",
+      "calibration_id": "3978d5c705e66ded38e9b3afebab90224a7155045d1824b06c125afa2b59ef6f",
+      "validated": true,
+      "validation_kind": "archived_development_empirical_envelope_NOT_heldout_guarantee",
+      "frame": "robot_base",
+      "xy_m": 0.0029066442720048686,
+      "z_m": 0.0025706393124395937,
+      "height_m": 0.002875098629889674,
+      "translation_rate": 0.01,
+      "rotation_rate": 0.01,
+      "age_rate": 0.0001,
+      "static_rate": 0.0001,
+      "max_age_seconds": 10.0,
+      "max_travel_m": 0.35,
+      "max_rotation_rad": 0.4,
+      "scope": "same public upright cube estimator, renderer and robot calibration; short noncontact rigid transport only",
+      "evidence": [
+        {
+          "path": "/home/hanyu/dqb/cap-x-20261106/outputs/model_comparison/graph_v22_20261122_180352/online-v22-1/normal-stack/episodes/G0/trace/20a73aeed5194be79fe1b5c36baf1c58/trace.jsonl",
+          "sha256": "0c7d854de52dd603493e61207b07bedcaf06b3b1c218c4863aaa89508a0a8fe5"
+        },
+        {
+          "path": "/home/hanyu/dqb/cap-x-20261106/outputs/model_comparison/graph_v22_20261122_180352/online-v22-1/normal-lift/episodes/G0/trace/8d47a7ef3eab44d4a6fcaa7c96d75871/trace.jsonl",
+          "sha256": "584cab0f68b7563df09fdbbaaa189895e296951ade11fb1639171c138235e47e"
+        },
+        {
+          "path": "/home/hanyu/dqb/cap-x-20261106/outputs/model_comparison/graph_v22_20261122_180352/online-v22-2/normal-restack/episodes/G1/trace/83f24789c77645b9a21a62f53fe888cb/trace.jsonl",
+          "sha256": "70662935ab069d34d6b62eba760345f90ba38462fb002c16b74f4454d2b247cf"
+        }
+      ],
+      "rate_policy": "conservative engineering growth allowance, NOT fitted probability",
+      "estimator_policy": "identifiable_current_faces_only",
+      "external_disturbance_policy": "contradiction/touch/slip/loss invalidates; arbitrary hidden disturbance not covered"
+    },
+    "evidence_planning": true
+  },
+  "graph_options": {
+    "diagnostic_slice": true,
+    "selective_invalidation": true,
+    "selective_recovery": true
+  },
+  "sources": [
+    "capx/experiments/graph_v2.py",
+    "capx/experiments/vision_tasks.py",
+    "capx/execution/grounded_feedback.py",
+    "capx/execution/grounded_targets.py",
+    "capx/execution/public_geometry.py",
+    "capx/execution/graph_feedback.py",
+    "capx/execution/dependency_graph.py",
+    "capx/execution/feedback.py",
+    "capx/execution/sandbox.py",
+    "capx/execution/actor.py",
+    "capx/envs/tasks/audited_stack.py",
+    "capx/envs/physical_evaluation.py",
+    "capx/multitask/runtime.py",
+    "capx/experiments/graph_feedback.py",
+    "capx/experiments/layered_feedback.py",
+    "capx/llm/providers.py",
+    "capx/llm/client.py",
+    "capx/experiments/graph_campaign.py",
+    "capx/experiments/graph_statistics.py",
+    "capx/integrations/franka/control.py",
+    "capx/envs/tasks/franka/franka_pick_place.py",
+    "capx/envs/tasks/franka/franka_lift.py",
+    "capx/envs/tasks/franka/franka_cube_restack.py",
+    "capx/envs/simulators/robosuite_base.py",
+    "capx/envs/simulators/robosuite_cubes.py",
+    "capx/envs/simulators/robosuite_cube_lift.py",
+    "capx/envs/simulators/robosuite_cubes_restack.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/stack.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/lift.py",
+    "capx/execution/grip_offset.py",
+    "capx/execution/support_geometry.py",
+    "capx/execution/grounded_control.py",
+    "capx/experiments/graph_v2_analysis.py",
+    "capx/experiments/graph_power.py",
+    "capx/experiments/graph_preflight.py",
+    "capx/execution/grasp_geometry.py",
+    "capx/execution/control_frames.py",
+    "capx/execution/table_clearance.py",
+    "capx/execution/robot_self_geometry.py",
+    "capx/execution/bounded_ik.py",
+    "capx/execution/public_camera.py",
+    "capx/execution/depth_sampling.py",
+    "capx/execution/grounded_recovery.py",
+    "capx/execution/task_conditions.py",
+    "capx/execution/graph_executive.py",
+    "capx/execution/diagnostic_context.py",
+    "capx/execution/task_definition.py",
+    "capx/execution/state_memory.py",
+    "capx/execution/evidence_planning.py"
+  ],
+  "prompt_files": [
+    "capx/execution/grounded_feedback.py",
+    "capx/experiments/graph_v2.py",
+    "capx/envs/tasks/franka/franka_pick_place.py",
+    "capx/envs/tasks/franka/franka_lift.py",
+    "capx/envs/tasks/franka/franka_cube_restack.py"
+  ],
+  "scoring_files": [
+    "capx/envs/physical_evaluation.py",
+    "capx/envs/tasks/audited_stack.py",
+    "capx/multitask/runtime.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/stack.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/lift.py"
+  ],
+  "note": "V23.1 development only: shared future evidence preparation, rigid dimension propagation and current semantic face fitting. No threshold reduction. Relative error diagnostic is NOT an online permission model.",
+  "study": "normal",
+  "runtime_environment": {
+    "MUJOCO_GL": "egl",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "__EGL_VENDOR_LIBRARY_FILENAMES": "/usr/share/glvnd/egl_vendor.d/50_mesa.json",
+    "MUJOCO_EGL_DEVICE_ID": "1",
+    "JAX_PLATFORMS": "cpu",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "cli_files": [
+    "scripts/local/graph_experiment.sh",
+    "scripts/local/common.sh",
+    "scripts/local/replay_graph_initial.py",
+    "scripts/local/diagnose_evidence.py",
+    "scripts/local/analyze_relative_memory.py",
+    "scripts/local/replay_state_memory.py",
+    "scripts/local/calibrate_state_memory.py"
+  ],
+  "asset_files": [
+    "capx/integrations/robosuite/controllers/config/robots/panda_joint_ctrl.json",
+    "outputs/reproduction/graph-complete-20261120/control-static-calibration-v2/robot-model.xml",
+    "capx/third_party/robosuite/robosuite/models/assets/robots/panda/robot.xml",
+    "capx/third_party/robosuite/robosuite/models/assets/bases/rethink_mount.xml",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/urdf/panda.urdf",
+    "outputs/reproduction/graph-complete-20261120/robot-selfseg-asset-closure.json",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/finger.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/hand.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link0.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link1.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link2.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link3.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link4.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link5.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link6.dae",
+    "/home/hanyu/.cache/robot_descriptions/example-robot-data/robots/panda_description/meshes/visual/link7.dae",
+    "capx/third_party/robosuite/robosuite/models/assets/grippers/panda_gripper.xml",
+    "capx/third_party/robosuite/robosuite/models/assets/grippers/meshes/panda_gripper/finger_vis.stl",
+    "capx/third_party/robosuite/robosuite/models/assets/grippers/meshes/panda_gripper/hand_vis.stl",
+    "env_configs/graph_feedback/calibration/memory-development-v23.json"
+  ],
+  "robot_calibration_file": "outputs/reproduction/graph-complete-20261120/control-static-calibration-v2/calibration.json",
+  "allowed_graph_ablations": [
+    {
+      "diagnostic_slice": false,
+      "selective_invalidation": true,
+      "selective_recovery": true
+    },
+    {
+      "diagnostic_slice": true,
+      "selective_invalidation": false,
+      "selective_recovery": true
+    },
+    {
+      "diagnostic_slice": true,
+      "selective_invalidation": true,
+      "selective_recovery": false
+    }
+  ],
+  "service_inventory": "outputs/reproduction/graph-complete-20261120/preflight-v4/service-inventory.json",
+  "mechanism_scene_subset": {
+    "rule": "first_scene_index",
+    "scenes_per_task": 20
+  },
+  "name": "graph-v23.1-development"
+}

@@ -24,7 +24,7 @@ CONDITIONS={
     'lift':'Lift red cube and keep holding it stably. DO NOT release.',
     'restack':'Green cube initially rests on red cube. Move green to a clear table region and release/retreat first, then stack red onto green, release, and retreat.',
 }
-SOURCES=('capx/experiments/graph_v2.py','capx/experiments/vision_tasks.py',
+SOURCES=('capx/execution/task_definition.py','capx/execution/task_conditions.py','capx/execution/graph_executive.py','capx/execution/state_memory.py','capx/experiments/graph_v2.py','capx/experiments/vision_tasks.py',
          'capx/execution/grounded_feedback.py','capx/execution/grounded_recovery.py','capx/execution/grounded_targets.py','capx/execution/public_geometry.py',
          'capx/execution/graph_feedback.py','capx/execution/dependency_graph.py','capx/execution/feedback.py',
          'capx/execution/sandbox.py','capx/execution/actor.py','capx/envs/tasks/audited_stack.py',
@@ -172,8 +172,11 @@ def base_prompt(env,task,group,budgets):
         prompt=copy.deepcopy(env._full_prompt)
         docs='\n'.join(api.combined_doc() for api in env._apis.values())
     else:
-        from capx.execution.grounded_feedback import API_DOC,V22_API_DOC
-        docs=V22_API_DOC if budgets.get('task_conditions',False) else API_DOC
+        from capx.execution.grounded_feedback import API_DOC,V22_API_DOC,V23_API_DOC
+        docs=(V23_API_DOC if budgets.get('generic_goals',False) else V22_API_DOC) if budgets.get('task_conditions',False) else API_DOC
+        if budgets.get('generic_goals',False):
+            from capx.execution.task_definition import resolve_definition
+            docs+='\nParent task definition: '+json.dumps(resolve_definition(budgets.get('task_definition',task)),sort_keys=True)
         prompt=[{'role':'system','content':'Generate Python using only the documented public robot and Vision APIs and numpy. No files, network, private attributes, env, obs or simulator state.'},
                 {'role':'user','content':env._task_prompt+'\nAPI documentation:\n'+docs}]
     prompt.append({'role':'user','content':CONDITIONS[task]+'\nUse deployment-observable Vision/robot state only. '
@@ -253,6 +256,7 @@ def install_monitor(env,group,task,dest,budgets,fault):
         np.savez_compressed(p,**arrays)
         save(p.with_suffix('.camera.json'),{'calibration':camera_metadata,'graph_source_ids':camera_sources,
             'raw_tool_branch':'SAM3/GraspNet retains legacy camera interface; monitor surfaces use the declared corrected projection'})
+        monitor.evidence_reference=str(p.relative_to(dest))
         return state
     def emit(event):
         env._write('feedback',**event,observation_file=f'{count[0]:05d}.npz')
@@ -267,7 +271,9 @@ def install_monitor(env,group,task,dest,budgets,fault):
     monitor=GroundedMonitor(group,task,observe,emit=emit,graph_emit=graph_emit,max_local=budgets['max_local'],
         max_episode_local=budgets['max_episode_local'],max_episode_views=budgets.get('max_episode_views',2),
         fault=fault,site=lambda:env._actor.call_site,graph_options=budgets.get('graph_options'),motion_transform=motion_transform,
-        ik_success_count=lambda:api.ik_solve_fn.successful_calls,task_conditions=budgets.get('task_conditions',False))
+        ik_success_count=lambda:api.ik_solve_fn.successful_calls,task_conditions=budgets.get('task_conditions',False),
+        task_definition=budgets.get('task_definition'),memory_profile=budgets.get('memory_profile'),
+        evidence_planning=budgets.get('evidence_planning',False))
     if task=='restack':
         from capx.execution.robot_self_geometry import PandaSelfGeometry
         from capx.execution.table_clearance import current_table_evidence

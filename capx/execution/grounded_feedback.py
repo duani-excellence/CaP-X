@@ -21,7 +21,7 @@ from .grounded_control import precise_goto
 from .support_geometry import color_points, current_support, reliable_top, retained_consistent
 from .grip_offset import calibrate as calibrate_attachment, predict as predict_attachment, check_surface as check_attachment
 
-APIS=['observe_object','observe_grasp','observe_surfaces','observe_table','reobserve_table','read_robot','plan_skill','run_plan','recall_result','verify_hold','verify_task']
+APIS=['observe_object','observe_grasp','observe_surfaces','observe_table','reobserve_table','read_robot','plan_skill','run_plan','recall_result','verify_hold','verify_task','declare_intent','prepare_evidence']
 API_DOC='''Grounded Vision API, robot-base metres and WXYZ. Actual SAM3/GraspNet and calibrated RGB-D are used. No simulator truth.
 Sandbox: use self-contained Python with only numpy imports. Names beginning with underscore (except the single '_' loop placeholder) and private attributes are forbidden; use id_of, not _id.
 Perception failure interrupts the entire actor; observe_* does NOT return None on failure. Do not call a known-failing observation and then branch on None or try to catch the interruption. Use recovery_preconditions before retrying. If a held cube occludes its support at placement height, plan a bounded upward observation move from a fresh robot source before retrying support observation; existing phase/control/budget checks still apply. Never release without current permission.
@@ -42,6 +42,7 @@ run_plan(id): consume plan once, validate current versions and phase, execute an
 open_gripper(): initial opening, or verified place/table_place release. After release the NEXT physical action must be a fresh retreat. Do not open twice, close, or home before retreat.
 close_gripper(): only after a returned approach with an empty gripper. Repeating close while already holding is forbidden and does not reset the grasp stage.
 verify_hold(): bounded public visual co-motion probe if lift baseline was unavailable. If the held object is occluded, it first attempts one already-budgeted yaw view using the same public attachment, height and neighbor-clearance constraints; only the subsequent co-motion check can verify hold. Does not lift repeatedly. May interrupt as unrecoverable when surfaces remain hidden or probe budget expires.
+prepare_evidence(): acquire an identifiable held-geometry anchor for forthcoming placement/release. Only while already holding_verified. Uses current geometry or at most one existing clearance-checked wrist view; it cannot grant release, renew an old observation, or restore lost grasp. Then acquire fresh source handles and create a new plan. An equivalent view or new source ID is not progress.
 recall_result(id): use a valid retained source without service calls; invalid sources are rejected. New actor variables vanish; physical stage, completed actions and episode budgets persist.
 home_pose(): only empty, after verified retreat. Never home while holding.
 Stack: grasp red, lift, place on green, release, retreat.
@@ -53,9 +54,16 @@ Recovery: inspect phase, grasp_active, recovery_scope and recovery_preconditions
 V22_API_DOC=API_DOC+'''\nverify_task(): refresh deployment-observable task conditions. Does not move, release, or return physical reward. Restack green-on-table is an INTERMEDIATE goal; red-on-green and safe retreat are still required. UNKNOWN requires evidence, not replay of historical actions. Returned API calls are not proof of their expected effects.\n'''
 
 
+V23_API_DOC=V22_API_DOC+"""
+V23 goal contract: the parent registers the task goals, prerequisite conditions and future skill intents BEFORE executing the program. They are intent, never current motion/release permission. declare_intent(rows) may additionally declare the program's ordered intended skills before the first physical call; rows contain skill, object, destination, and optional after (indices of earlier rows). Only bindings present in the parent task contract are legal. plan_skill/run_plan are linked to those intents and still undergo every parent boundary check. Python code remains a complete program; no line-by-line resumption.
+observe_surfaces may return evidence_kind='predicted', current_visual_detection=False and an error_bounds dictionary only when historical identifiable geometry, public robot propagation, calibration, expected RGB-D occlusion and the current safety contract all permit it. It is never a fresh visual detection. Missing/contradictory/expired or too-wide predictions interrupt; repeatedly asking the same occluded view does not improve evidence. verify_task checks complete declared goals, not historical return receipts.
+"""
+
+
 class GroundedMonitor(GraphFeedbackMonitor):
-    def __init__(self,mode,task,observe,*,emit=None,graph_emit=None,max_local=3,max_episode_local=8,max_episode_views=2,fault='none',site=None,graph_options=None,motion_transform=None,ik_success_count=None,task_conditions=False):
-        if task not in ('stack','lift','restack'):raise ValueError('Unsupported task')
+    def __init__(self,mode,task,observe,*,emit=None,graph_emit=None,max_local=3,max_episode_local=8,max_episode_views=2,fault='none',site=None,graph_options=None,motion_transform=None,ik_success_count=None,task_conditions=False,task_definition=None,memory_profile=None,evidence_planning=False):
+        from .task_definition import resolve_definition
+        self.task_definition=resolve_definition(task_definition if task_definition is not None else task)
         if type(max_episode_views) is not int or max_episode_views<0:raise ValueError('Invalid episode view budget')
         options=dict(diagnostic_slice=True,selective_invalidation=True,selective_recovery=True)
         if graph_options and (set(graph_options)-set(options) or any(type(v) is not bool for v in graph_options.values())):raise ValueError('Invalid graph options')
@@ -72,7 +80,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
         self.fault=fault;self.task=task;self.phase='ready';self.held_object=None;self.approached_object=None
         self.geometry={};self.geometry_ids={};self.baseline=None;self.close_tcp_z=None;self.table_z=None;self.points=np.empty((0,3))
         self.lift_attempts=0;self.hold_probes=0;self.local_attempts=0;self.max_episode_local=max_episode_local
-        self.last_place=None;self.terminal_reason=None;self.object_epochs={'red cube':0,'green cube':0}
+        self.last_place=None;self.terminal_reason=None;self.object_epochs={o:0 for o in self.task_definition['objects']}
         self.recovery_outcomes=[];self.attachment=None;self.attachment_id=None
         self.support_history={};self.colored_points={};self.active_authorization=None
         self.active_dependencies=None
@@ -85,14 +93,26 @@ class GroundedMonitor(GraphFeedbackMonitor):
         self.visibility_contexts=[];self.visibility_context=None
         self.visibility_translation_m=.03  # Resource-policy separation, never a geometry acceptance tolerance.
         self.observation_calibration_sources=[];self.rejected_table_targets=[];self.last_grasp_loss=None
+        self.memory=None;self.evidence_reference=None
+        self.evidence_planning=evidence_planning;self.evidence_request=None
+        if memory_profile:
+            from .state_memory import StateMemory
+            self.memory=StateMemory(self.graph,memory_profile)
         self.conditions=None
         if task_conditions:self.enable_task_conditions()
 
     def enable_task_conditions(self):
         if self.conditions is None:
             from .task_conditions import TaskConditions
-            self.conditions=TaskConditions(self.graph,self.task)
+            self.conditions=TaskConditions(self.graph,self.task_definition)
         return self.conditions
+
+    def task_definition_destination(self,obj):
+        return next((r['destination'] for r in self.task_definition['subgoals'] if r['object']==obj),None)
+
+    def _object_binding(self,name):
+        if name not in self.task_definition['objects']:raise ValueError('Unknown task object')
+        return self.task_definition['objects'][name]
 
     def register_camera_calibration(self,metadata):
         """Bind every corrected frame to its exact public projection version.
@@ -130,7 +150,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
         self.current_public_state=state
         self.last_public={k:np.asarray(v).tolist() for k,v in state.items() if not isinstance(v,dict)}
         self.last_evidence,self.table_z,self.points=self.geometry_fn(state)
-        self.colored_points={name:self.color_points_fn(state,name) for name in self.object_epochs}
+        self.colored_points={name:self.color_points_fn(state,self._object_binding(name)['perception_name']) for name in self.object_epochs}
         # Retire prior-world evidence before registering this newly acquired
         # frame. In G0 a real support update discards all old work, including
         # calibration estimate nodes; it must not invalidate its own new frame.
@@ -151,10 +171,12 @@ class GroundedMonitor(GraphFeedbackMonitor):
             # no private state or additional perception request is introduced.
             self.register_camera_calibration(calibration)
         self.last_observation=self.graph.add('observation',{'robot':self.last_public,'surfaces':self.last_evidence,
-            'table_z':self.table_z,'source':'public_RGBD_and_robot_proprioception'},parents=self.observation_calibration_sources)
+            'table_z':self.table_z,'source':'public_RGBD_and_robot_proprioception',
+            'evidence_ref':self.evidence_reference},parents=self.observation_calibration_sources)
         for name,surface in current_surfaces:
             fact=self.graph.add('verification_fact',{'type':'historical_full_support_surface','object':name,'object_epoch':self.object_epochs[name],'surface':surface},parents=[self.last_observation,self.geometry_ids[name]])
             self.support_history[name]={'epoch':self.object_epochs[name],'surface':copy.deepcopy(surface),'source_id':fact}
+        if self.memory:self._refresh_memory()
         if self.conditions:self.conditions.refresh(self)
         return state,self.last_evidence
 
@@ -189,6 +211,8 @@ class GroundedMonitor(GraphFeedbackMonitor):
         super()._physical_effect_unknown(name,node)
         self.reconciliation_required['previous_phase']=previous
         self.attachment=None;self.attachment_id=None;self.last_place=None
+        if self.memory:
+            for obj in self.object_epochs:self.memory.invalidate(obj,'unknown_effect')
         if self.conditions:
             for key in list(self.conditions.ids):
                 self.conditions.set(key,'UNKNOWN',reason='unknown_physical_effect_quarantine')
@@ -234,6 +258,11 @@ class GroundedMonitor(GraphFeedbackMonitor):
         self.capture()
         self._require_current_grasp(operation)
         parents=list(roots)+list(self.skill_facts.values())
+        if self.conditions:
+            obj=self.held_object or self.approached_object
+            skill='open_gripper' if operation=='release' else operation
+            intent=self.conditions.intent(skill,obj)
+            if intent:parents.append((intent,'attestation'))
         self.record('L2','phase_precondition','PASS' if allowed else 'FAIL',reason,
             {'operation':operation,'phase':self.phase,'closed':self.closed,
              'lifted':self.lifted,'held_object':self.held_object,
@@ -338,6 +367,9 @@ class GroundedMonitor(GraphFeedbackMonitor):
             current=self._surface(name);geom=self.geometry.get(name)
             if not reliable_top(current,geom):
                 current=current_support(self.colored_points.get(name,np.empty((0,3))),self.table_z,geom,camera_origin=self._current_camera_origin())
+            if current is None and self.memory:
+                current=self._predicted_surface(name)
+                if current:conditional.append(name)
             if current is None:
                 # A partial current view can only support a clear, non-descending
                 # transit under explicit static-support assumptions. It is never
@@ -370,7 +402,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
             # A missing Restack stage witness can only inherit the SAME explicit
             # clear-transit policy as its support geometry. It cannot authorize
             # descent or release; a contradictory condition never permits motion.
-            conditional_keys=['placed:green cube:table'] if 'green cube' in conditional else []
+            conditional_keys=[r['condition'] for r in self.task_definition['subgoals'] if r['object'] in conditional]
             missing_conditions=[key for key in unknown if key not in conditional_keys]
             if failed or missing_conditions:
                 keys=failed+missing_conditions
@@ -391,6 +423,25 @@ class GroundedMonitor(GraphFeedbackMonitor):
             self._stop('current_support_evidence_required',[plan_id,self.last_check],
                 metrics={'recoverable':True,'missing_surface_object':missing[0],
                          'next_action':'acquire_support_evidence_then_new_place_plan'})
+        if self.memory and motion is not None and contract.get('stage')=='final':
+            # A predicted surface is not enough by itself: the intended final
+            # pose must satisfy the same release geometry over the full error
+            # interval before descending. Both policies use this common gate.
+            data=self.graph.nodes[plan_id]['data']
+            if data['skill']=='place':
+                obj=self.graph.nodes[data['inputs']['support_surface']]['data']['object']
+                support=self._current_state_surface(obj);held=self._held_surface()
+                if any((x or {}).get('evidence_kind')=='predicted' for x in (support,held)):
+                    if not held or not support:self._stop('prediction_missing_final_descent_evidence')
+                    from .evidence_planning import placement_obligations
+                    if support.get('evidence_kind')!='predicted':support=self._calibrated_direct_surface(obj)
+                    obligation=placement_obligations(self.memory,held_object=self.held_object,support=support,
+                        geometry=self.geometry[self.held_object],tcp=self.last_public['robot_cartesian_pos'],
+                        target=motion[0],quaternion=motion[1],stamp=time.monotonic(),
+                        calibration=self._memory_calibration(),grasp_epoch=self.grasp_epoch)
+                    check=obligation.get('release_forecast',obligation)
+                    self.record('L2','predicted_descent',check['status'],check['reason'],check)
+                    if check['status']!='PASS':self._stop('prediction_interval_blocks_final_descent',metrics={'recoverable':True})
 
     def _stop(self,reason,roots=(),incomplete=False,metrics=None):
         # Preserve the actual failed check as a causal root before adding L3.
@@ -415,11 +466,11 @@ class GroundedMonitor(GraphFeedbackMonitor):
         return {'id':node,**copy.deepcopy(data)}
 
     def _surface(self,name):
-        return self.last_evidence.get('red' if name=='red cube' else 'green')
+        return self.last_evidence.get(self._object_binding(name)['sensor_key'])
 
     def _observe_object(self,name,fn):
-        if name not in ('red cube','green cube') or self.task=='lift' and name!='red cube':raise ValueError('Unknown task object')
-        value=FeedbackMonitor.invoke(self,'get_object_pose',[name],{'return_bbox_extent':True},fn)
+        self._object_binding(name)
+        value=FeedbackMonitor.invoke(self,'get_object_pose',[self._object_binding(name)['perception_name']],{'return_bbox_extent':True},fn)
         self.capture();surface=self._surface(name)
         if not self.closed or name!=self.held_object:
             # A nonheld object's current public geometry can be acquired during
@@ -443,9 +494,8 @@ class GroundedMonitor(GraphFeedbackMonitor):
             gripper_joints=None if 'robot_gripper_joint_pos' not in state else np.asarray(state['robot_gripper_joint_pos']).tolist()))
 
     def _surfaces(self,name,fn=None):
-        if name not in ('red cube','green cube') or self.task=='lift' and name!='red cube':
-            raise ValueError('Unknown task object')
-        self.capture();s=self._held_surface() if name==self.held_object and self.closed else self._support_surface(name)
+        self._object_binding(name)
+        self.capture();s=self._held_surface() if name==self.held_object and self.closed else self._current_state_surface(name) if self.memory else self._support_surface(name)
         if s is None and name==self.held_object and self.closed and fn is not None:
             s=self._recover_held_visibility(fn)
         if s is None:
@@ -503,7 +553,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
             'visibility_policy':{'max_episode_views':self.max_episode_views,'min_translation_m':self.visibility_translation_m,
                 'yaw_candidates_degrees':[20,-20],'context_requires_returned_nonprobe_translation':True}}
 
-    def _recover_held_visibility(self,fn,*,single_step=False,verification_probe=False):
+    def _recover_held_visibility(self,fn,*,single_step=False,verification_probe=False,require_anchor=False):
         """Bounded active perception; no simulated object state or blind release.
 
         A wrist-yaw changes the camera view without repeatedly raising the object.
@@ -527,7 +577,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
             if verifying:
                 clear=clear and self.close_tcp_z is not None and tcp[2]-self.close_tcp_z>=.05
             neighbor_evidence=[]
-            for obj in ([] if self.task=='lift' else [x for x in self.object_epochs if x!=self.held_object]):
+            for obj in [x for x in self.object_epochs if x!=self.held_object]:
                 points=self.colored_points.get(obj,np.empty((0,3)))
                 surface=self._surface(obj)
                 known=surface is not None and len(points)>=30
@@ -554,12 +604,66 @@ class GroundedMonitor(GraphFeedbackMonitor):
                 attempt=self.visibility_probes,remaining_episode=max(0,self.max_episode_views-self.visibility_probes))
             self._move(tcp[:3].tolist(),target_q,0.,fn,'visibility_probe')
             self.capture();surface=self._held_surface()
+            if require_anchor:
+                from .table_clearance import _current_cube_shape
+                if not _current_cube_shape(surface) or surface.get('evidence_kind')=='predicted':surface=None
             self.recovery_outcomes.append({'kind':'active_visibility','attempt':self.visibility_probes,
                 'yaw_from_reference_degrees':yaw,'context_id':context['context_id'],
                 'success':surface is not None,'public_only':True})
             if surface is not None or single_step:return surface
         self.terminal_reason='visibility_context_candidates_exhausted' if single_step else 'held_surface_evidence_unrecoverable'
         return None
+
+    def _prepare_evidence(self,fn):
+        from .table_clearance import _current_cube_shape
+        allowed=bool(self.memory and self.phase=='holding_verified' and self.closed and self.lifted)
+        self._phase_guard('prepare_evidence',allowed,'verified_hold_required_for_geometry_anchor')
+        self.capture();surface=self._held_surface()
+        direct=lambda s: bool(_current_cube_shape(s) and s.get('evidence_kind')!='predicted')
+        before=direct(surface)
+        if not before:surface=self._recover_held_visibility(fn,single_step=True,require_anchor=True)
+        good=direct(surface)
+        self.record('L0','future_anchor','PASS' if good else 'UNCERTAIN',
+            'identifiable_current_anchor' if good else 'no_new_identifiable_geometry',
+            {'missing_quantity':'held_geometry_anchor','progress':good and not before,
+             'new_source_id_alone_is_progress':False,'future_request':self.evidence_request,
+             'physical_view_budget':self._view_budget()},action='continue' if good else 'reobserve')
+        if not good:self._stop('future_anchor_unavailable',metrics={'recoverable':self._view_budget()['change_view_available'],
+            'next_action':'prepare_evidence_then_fresh_plan','missing_evidence':['held_geometry_anchor']})
+        self.evidence_request=None
+        return dict(status='PASS',evidence_id=self.last_check,permission=False)
+
+    def _prepare_descent(self,p,q):
+        """Resolve future evidence while the object is still above the target."""
+        if not self.evidence_planning or not self.memory or not self.active_plan:return
+        from .evidence_planning import placement_obligations
+        from .table_clearance import _current_cube_shape
+        d=self.graph.nodes[self.active_plan]['data'];obj=d['object']
+        self.capture();held=self._held_surface()
+        intent=self.conditions.intent(d['skill'],obj) if self.conditions else None
+        if d['skill']=='place':
+            support_obj=self.graph.nodes[d['inputs']['support_surface']]['data']['object']
+            support=self._current_state_surface(support_obj)
+            if support and support.get('evidence_kind')!='predicted':support=self._calibrated_direct_surface(support_obj)
+            row=placement_obligations(self.memory,held_object=obj,support=support,
+                geometry=self.geometry[obj],tcp=self.last_public['robot_cartesian_pos'],target=p,quaternion=q,
+                stamp=time.monotonic(),calibration=self._memory_calibration(),grasp_epoch=self.grasp_epoch,intent_id=intent)
+        else:
+            # Table placement uses its existing CURRENT instance/robot/ray
+            # clearance contract. A predicted box cannot replace those masks.
+            validation=self._current_table_check(d['inputs']['table_region'])
+            row=dict(status='PASS',reason='current_table_contract_before_descent',permission=False,
+                future_intent_id=intent,requirements=['held_instance_shape','fresh_table_clearance','fresh_final_capture'],
+                missing=[],current_validation=validation,next_work='continue_to_boundary_checks')
+        parents=[self.active_plan,self.last_observation]+([intent] if intent else [])
+        parents+=row.get('retained_sources',[])
+        node=self.graph.add('evidence_plan',row,parents=parents)
+        self.record('L0','future_evidence',row['status'],row['reason'],row,graph_parents=[node])
+        if row['status']!='PASS':
+            self.evidence_request=dict(row,source_id=node)
+            self._stop('future_evidence_not_ready',[node,self.last_check],metrics={'recoverable':True,
+                'missing_evidence':row['missing'],'next_action':'prepare_evidence_then_fresh_plan'
+                    if row['next_work']=='acquire_anchor' else 'fresh_alignment_plan_from_current_surfaces'})
 
     def _reserve_semantic_refinement(self):
         # Perception recovery consumes the SAME episode-local budget as motion
@@ -581,6 +685,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
                 observation_id=self.last_observation,held_identity_verified=self.phase=='holding_verified',nonheld_geometry=geometry)
         validation=result['validation'];evidence=result['evidence']
         parents=list(parents)+([self.attachment_id] if self.attachment_id else [])
+        if held and held.get('memory_id'):parents.append(held['memory_id'])
         if held and held.get('attachment_check_id'):parents.append(held['attachment_check_id'])
         parents.extend(evidence.get('geometry_source_ids',[]));parents=list(dict.fromkeys(parents))
         for source in parents:self._valid(source)
@@ -604,6 +709,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
         """
         validation=self.graph.nodes[gate]['data']['metrics'].get('validation',{})
         if validation.get('status')!='FAIL' or validation.get('reason')!='current_nonheld_obstacle_in_table_region':return None
+        if self._table_needs_identity_view(gate):return None
         if self.phase!='holding_verified' or not self.closed or self.terminal_reason is not None:return None
         region=copy.deepcopy(self.graph.nodes[region_id]['data'])
         if region.get('object')!=self.held_object:return None
@@ -621,6 +727,18 @@ class GroundedMonitor(GraphFeedbackMonitor):
             'object':self.held_object,'grasp_epoch':self.grasp_epoch,'region':region})
         return fact
 
+    def _table_needs_identity_view(self,gate):
+        # When all named nonheld objects are CURRENTLY localized outside this
+        # region, leftover depth has unknown identity. One existing legal view
+        # is more informative than declaring another region necessary. This
+        # does not clear any pixel, change FAIL, or authorize a physical action.
+        evidence=self.graph.nodes[gate]['data']['metrics'].get('evidence',{})
+        rows=evidence.get('nonheld_current_evidence',[])
+        expected=set(self.object_epochs)-{self.held_object}
+        established={r.get('object') for r in rows if r.get('source_id')
+            and r.get('outside_region_with_margin') is True}
+        return bool(expected and expected<=established and self._view_budget()['change_view_available'])
+
     def _table_recovery_hint(self,gate):
         """Choose evidence acquisition before view motion when a source is missing."""
         metrics=self.graph.nodes[gate]['data']['metrics']
@@ -637,7 +755,8 @@ class GroundedMonitor(GraphFeedbackMonitor):
                 next_action='observe_missing_nonheld_objects_then_reobserve_table_without_motion',
                 reobserve_change_view=False)
         if (validation.get('status')=='FAIL'
-            and validation.get('reason')=='current_nonheld_obstacle_in_table_region'):
+            and validation.get('reason')=='current_nonheld_obstacle_in_table_region'
+            and not self._table_needs_identity_view(gate)):
             hint.update(recoverable=self.terminal_reason is None,
                 next_action='observe_alternative_table_region_then_refresh_surface_robot_and_plan',
                 rejected_region_id=metrics.get('region_id'))
@@ -741,14 +860,137 @@ class GroundedMonitor(GraphFeedbackMonitor):
         check=check_attachment(predicted,visible,points=self.colored_points.get(self.held_object),geometry=self.geometry.get(self.held_object),camera_origin=self._current_camera_origin())
         self.record('L0','attachment_consistency',check['status'],check['reason'],check,
                     graph_parents=[self.attachment_id])
-        if check['status']!='PASS':return None
+        if check['status']!='PASS':
+            if check['status']=='FAIL' and self.memory:
+                self.memory.contradict(self.held_object,visible,source=self.last_observation)
+            return self._predicted_surface(self.held_object) if check['status']=='UNCERTAIN' else None
         return {**predicted,**check.get('current_surface',{}),'frame':'robot_base','attachment_check_id':self.last_check,
                 'conditional_attachment':True,'visible_surface':visible}
+
+    def _memory_calibration(self):
+        # Stable semantic camera projection, not ephemeral graph node IDs.
+        return hashlib.sha256(json.dumps([
+            self.graph.nodes[i]['data']['calibration'] for i in self.observation_calibration_sources
+        ],sort_keys=True).encode()).hexdigest() if self.observation_calibration_sources else None
+
+    def _remember_surface(self,obj,surface,attached):
+        if not self.memory or not surface:return
+        self.memory.observe(obj,surface,self.geometry[obj],source=self.last_observation,
+            calibration=self._memory_calibration(),stamp=time.monotonic(),evidence_ref=self.evidence_reference,
+            tcp=self.last_public['robot_cartesian_pos'],attached=attached,grasp_epoch=self.grasp_epoch)
+
+    def _refresh_memory(self):
+        """Memory never turns a consistency heuristic into independent evidence."""
+        for obj,geom in self.geometry.items():
+            attached=self.closed and obj==self.held_object
+            visible=self._surface(obj);prior=self.memory.records.get(obj)
+            if attached:
+                if not self.attachment or not self.lifted:continue
+                predicted=predict_attachment(self.attachment,self.last_public['robot_cartesian_pos'])
+                check=check_attachment(predicted,visible,points=self.colored_points.get(obj),
+                    geometry=geom,camera_origin=self._current_camera_origin())
+                if check['status']=='FAIL':self.memory.contradict(obj,visible,source=self.last_observation)
+                elif check['status']=='PASS' and check.get('current_surface'):
+                    self._remember_surface(obj,{**predicted,**check.get('current_surface',{}),'frame':'robot_base'},True)
+                elif prior:
+                    # Account for ALL motion, including out-and-back paths;
+                    # missing pixels cannot reset age, distance or rotation.
+                    if self.memory.partial_conflict(obj,self.colored_points.get(obj,[]),self.last_public['robot_cartesian_pos']):
+                        self.memory.contradict(obj,visible,source=self.last_observation)
+                    else:self._predicted_surface(obj)
+            else:
+                current=current_support(self.colored_points.get(obj,np.empty((0,3))),self.table_z,geom,
+                    camera_origin=self._current_camera_origin())
+                if current:
+                    if prior and prior['status'] not in ('UNKNOWN','CONTRADICTED'):
+                        delta=np.linalg.norm(np.asarray(current['center'])[:2]-np.asarray(prior['surface']['center'])[:2])
+                        dz=abs(current['hi'][2]-prior['surface']['hi'][2])
+                        if delta>self.memory.profile['xy_m']*2 or dz>self.memory.profile['z_m']*2:
+                            self.memory.contradict(obj,current,source=self.last_observation)
+                            # Fresh independent localization starts a NEW version;
+                            # its old dependent plans are already invalidated.
+                    self._remember_surface(obj,current,False)
+                elif prior:
+                    # Assess loss of the noncontact assumption even when no
+                    # caller currently asks for this support. A later ascent
+                    # must not revive evidence from before a possible touch.
+                    self._predicted_surface(obj)
+
+    def _predicted_surface(self,obj):
+        if not self.memory:return None
+        from .state_memory import depth_occlusion
+        r=self.memory.records.get(obj)
+        if not r:return None
+        surface=copy.deepcopy(r['surface']);tcp=self.last_public['robot_cartesian_pos']
+        if r['attached']:
+            from .grip_offset import rotation
+            delta=np.asarray(tcp[:3])+rotation(tcp[3:7])@np.asarray(r['offset'])-np.asarray(surface['center'])
+            for key in ('center','lo','hi'):surface[key]=(np.asarray(surface[key])+delta).tolist()
+        occlusion=depth_occlusion(self.current_public_state or {},surface,r['geometry']['height_m'])
+        # Static prediction needs positive clearance, not merely absence of a
+        # contact sensor. Release/near-contact invalidates it explicitly.
+        clear=self._static_memory_clear(obj,surface)
+        estimate=self.memory.estimate(obj,tcp=tcp,stamp=time.monotonic(),calibration=self._memory_calibration(),
+            grasp_epoch=self.grasp_epoch,hold_verified=self.phase=='holding_verified' and self.lifted,
+            occlusion=occlusion,static_clear=clear)
+        if estimate['status']!='PREDICTED':
+            self.graph._event('memory_rejected',object=obj,**estimate)
+            return None
+        node=self.graph.add('state_prediction',estimate,parents=[estimate['source_id'],self.last_observation])
+        return dict(estimate['surface'],frame='robot_base',evidence_kind='predicted',
+            memory_id=node,error_bounds=estimate['bounds'],current_visual_detection=False,
+            evidence_ref=estimate['evidence_ref'],prior_source_id=estimate['source_id'])
+
+    def _static_memory_clear(self,obj,surface):
+        if not self.closed or not self.held_object or not self.attachment:return False
+        if obj==self.held_object:return False
+        from .grip_offset import rotation
+        record=self.memory.records.get(self.held_object)
+        if not record or not record['attached'] or record['status'] in ('UNKNOWN','CONTRADICTED'):return False
+        tcp=np.asarray(self.last_public['robot_cartesian_pos'])
+        center=tcp[:3]+rotation(tcp[3:7])@np.asarray(record['offset'])
+        bottom=center[2]-record['geometry']['height_m']/2
+        p=self.memory.profile
+        # For support below a rigid carried cube, a certified positive gap is
+        # the only first-version noncontact witness. Other configurations stay
+        # UNKNOWN; no inference from missing contact readings.
+        gap=bottom-surface['hi'][2]
+        clear=gap>2*p['z_m']+p['height_m'] and self.phase=='holding_verified'
+        if not clear:self.memory.invalidate(obj,'possible_contact')
+        return clear
+
+    def _current_state_surface(self,obj):
+        # Target compilation and its future verifier must consume the SAME
+        # current estimator. Replanning from a loose top centroid while checking
+        # against an identifiable face simply repeats a deterministic bias.
+        calibrated=self._calibrated_direct_surface(obj)
+        if calibrated is not None:return calibrated
+        current=self._support_surface(obj,allow_retained=False)
+        return current if current is not None else self._predicted_surface(obj)
+
+    def _calibrated_direct_surface(self,obj):
+        """Only this capture's identifiable face fit has the face envelope.
+
+        The legacy full-top/attachment screen remains a direct-observation path,
+        but may not borrow a narrower calibration for a different estimator.
+        SAM3 shape refinement has not been calibrated as a memory anchor either.
+        """
+        if not self.memory:return None
+        record=self.memory.records.get(obj)
+        if not record or record['current_status']!='DIRECT':return None
+        node=self.graph.nodes[record['node']]
+        if not node['valid'] or node['data'].get('source_id')!=self.last_observation:return None
+        if record['calibration']!=self._memory_calibration():return None
+        return dict(record['surface'],evidence_kind='direct_calibrated_face',
+            current_visual_detection=True,calibrated_observation_id=self.last_observation,
+            calibration_model_id=self.memory.model,memory_anchor_ref=record['node'],
+            evidence_ref=record['evidence_ref'],
+            error_bounds={k:self.memory.profile[k] for k in ('xy_m','z_m','height_m')})
 
     def _grasp(self,name,fn):
         if self.closed:self._stop('already_holding_do_not_resample_grasp')
         if name not in self.geometry:self._observe_object(name,fn)
-        raw=FeedbackMonitor.invoke(self,'sample_grasp_pose',[name],{},fn)
+        raw=FeedbackMonitor.invoke(self,'sample_grasp_pose',[self._object_binding(name)['perception_name']],{},fn)
         self.capture();s=self._surface(name);g=self.geometry.get(name)
         if not s or not g:self._stop('pregrasp_geometry_unavailable',metrics={'object':name,'recoverable':'reobserve_before_approach'})
         q=np.asarray(raw[1],float)
@@ -787,6 +1029,9 @@ class GroundedMonitor(GraphFeedbackMonitor):
             self._stop('table_region_object_identity_mismatch',list(inputs.values()))
         parents=[(i,'data') for i in inputs.values()]+[(self.capability,'precondition')]
         if self.fragment:parents.append(self.fragment)
+        if self.conditions:
+            intent=self.conditions.intent(skill,obj)
+            if intent:parents.append((intent,'attestation'))
         if skill in ('place','table_place','retreat'):parents.append((self.placement,'precondition'))
         condition_keys=self._skill_condition_keys(skill,obj)
         if self.conditions:
@@ -801,13 +1046,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
             required_conditions=condition_keys,external_references=references,**target),parents=parents)
 
     def _skill_condition_keys(self,skill,obj):
-        if not self.conditions:return []
-        if skill in ('place','table_place'):
-            keys=['holding:'+str(obj)]
-            if self.task=='restack' and skill=='place' and obj=='red cube':keys.append('placed:green cube:table')
-            return keys
-        if skill=='approach' and self.task=='restack' and obj=='red cube':return ['placed:green cube:table']
-        return []
+        return self.conditions.required(skill,obj) if self.conditions else []
 
     def _effects(self,name):
         roots=[]
@@ -833,11 +1072,14 @@ class GroundedMonitor(GraphFeedbackMonitor):
                     self.active_dependencies['external_epochs'][obj]+=1
         self.graph._event('physical_effect',api=name,phase=self.phase,held_object=self.held_object,
                           object_epochs=self.object_epochs,invalidated_sources=roots)
+        if self.memory and name in ('open_gripper','close_gripper'):
+            for obj in self.object_epochs:self.memory.invalidate(obj,'touch_or_grip_transition')
         if self.conditions:self.conditions.motion_effect(self,name)
 
     def _grasp_lost(self,reason):
         """Commit existing public empty-jaw evidence; keep actions as history."""
         obj=self.held_object
+        if self.memory:self.memory.invalidate(obj,'grasp_lost')
         parents=[n for n in (self.last_observation,self.last_call,self.attachment_id) if n]
         roots=[n['id'] for n in self.graph.nodes.values() if n['valid']
             and n['kind'] in ('estimate','plan') and (n.get('data') or {}).get('object')==obj]
@@ -901,7 +1143,8 @@ class GroundedMonitor(GraphFeedbackMonitor):
                 {k:v for k,v in event.items() if k not in ('schema','layer','check','status','reason')})
             if event['check']=='precise_tcp_pre_descent' and self.active_plan:
                 plan=self.graph.nodes[self.active_plan]['data']
-                if plan['skill']=='table_place':self._current_table_check(plan['inputs']['table_region'])
+                self._prepare_descent(p,q)
+                if plan['skill']=='table_place' and not (self.evidence_planning and self.memory):self._current_table_check(plan['inputs']['table_region'])
         result=precise_goto(p,q,observe=lambda:self.capture()[0],execute=execute,
             reserve_correction=reserve,emit=emit,lift_verified=self.phase=='holding_verified',
             max_corrections=self.max_local)
@@ -988,7 +1231,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
             fingers=np.abs(fingers)
             if np.min(fingers)<.035 or np.max(fingers)-np.min(fingers)>.002:
                 self._stop('open_gripper_before_approach',[plan_id],metrics={'recoverable':True,'next_action':'open_gripper_then_fresh_robot_and_plan'})
-            neighbors=[] if self.task=='lift' else [name for name in self.object_epochs if name!=d['object']]
+            neighbors=[name for name in self.object_epochs if name!=d['object']]
             sweep=panda_open_sweep(d['position'],d['quaternion_wxyz'],
                 {name:self.colored_points.get(name,np.empty((0,3))) for name in neighbors},
                 opening_m=float(np.clip(fingers.max()*2,0,.08)),z_approach=d['z_approach'])
@@ -1069,13 +1312,13 @@ class GroundedMonitor(GraphFeedbackMonitor):
         finally:self.active_plan=None;self.active_dependencies=None
 
     def _release_evidence(self,target,held=None):
-        if self.conditions and self.task=='restack' and target['skill']=='place' and self.held_object=='red cube':
-            prerequisite=self.conditions.get('placed:green cube:table')
-            if prerequisite['truth']!='TRUE':
-                self._stop('task_condition_requires_revalidation_before_release',
-                    [prerequisite['id']] if prerequisite['id'] else [],metrics={
-                        'failed_conditions':['placed:green cube:table'],'recoverable':True,
-                        'next_action':'verify_or_restore_prior_task_stage_before_release'})
+        if self.conditions:
+            required=self.conditions.required(target['skill'],self.held_object)
+            missing=[key for key in required if self.conditions.get(key)['truth']!='TRUE']
+            if missing:self._stop('task_condition_requires_revalidation_before_release',
+                [self.conditions.get(key)['id'] for key in missing if self.conditions.get(key)['id']],
+                metrics={'failed_conditions':missing,'recoverable':True,
+                         'next_action':'verify_or_restore_prior_task_stage_before_release'})
         table_gate=None
         if target['skill']=='table_place':
             # Table validation captures again. All held/release evidence must
@@ -1086,6 +1329,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
         held_parents=[self.last_observation]
         if self.geometry_ids.get(self.held_object):held_parents.append(self.geometry_ids[self.held_object])
         if self.attachment_id:held_parents.append(self.attachment_id)
+        if held and held.get('memory_id'):held_parents.append(held['memory_id'])
         if held and held.get('attachment_check_id'):held_parents.append(held['attachment_check_id'])
         elif self.attachment is not None and self.last_check:held_parents.append(self.last_check)
         # These are THIS release attempt's public estimates, not the old
@@ -1098,19 +1342,36 @@ class GroundedMonitor(GraphFeedbackMonitor):
             support_name='observed_table_region'
             support_parents=[self.last_observation,target['inputs']['table_region'],table_gate]
         else:
-            support_name=self.graph.nodes[target['inputs']['support_surface']]['data']['object'];support=self._support_surface(support_name,allow_retained=False)
+            support_name=self.graph.nodes[target['inputs']['support_surface']]['data']['object'];support=self._current_state_surface(support_name)
             support_parents=[self.last_observation]
             if self.geometry_ids.get(support_name):support_parents.append(self.geometry_ids[support_name])
+        predicted=any((s or {}).get('evidence_kind')=='predicted' for s in (held,support))
+        if predicted:
+            if support and support.get('evidence_kind')!='predicted':
+                support=self._calibrated_direct_surface(support_name)
+            if held and held.get('evidence_kind')!='predicted':
+                held=self._calibrated_direct_surface(self.held_object)
+            # Rebind the actual estimates used by the interval checker. The
+            # earlier diagnostic estimate is not evidence for another method.
+            held_evidence=self.graph.add('estimate',{'type':'bounded_release_held','surface':copy.deepcopy(held)},
+                parents=held_parents+([held['memory_id']] if (held or {}).get('memory_id') else [])
+                    +([held['calibration_model_id']] if (held or {}).get('calibration_model_id') else []))
+        if (support or {}).get('calibration_model_id'):support_parents.append(support['calibration_model_id'])
         support_evidence=self.graph.add('estimate',{'type':'surface','object':support_name,
             'evidence_role':'pre_release_support','surface':copy.deepcopy(support),
-            'current_observation_only':True},parents=list(dict.fromkeys(support_parents)))
+            'current_observation_only':not (support or {}).get('evidence_kind')=='predicted'},parents=list(dict.fromkeys(support_parents+([(support or {})['memory_id']] if (support or {}).get('memory_id') else []))))
         check=place_metrics(held,support,self.geometry.get(self.held_object))
+        if predicted:
+            from .state_memory import bounded_place_metrics
+            bounds={k:self.memory.profile[k] for k in ('xy_m','z_m','height_m')}
+            check=bounded_place_metrics(held,support,self.geometry.get(self.held_object),
+                (held or {}).get('error_bounds',bounds),(support or {}).get('error_bounds',bounds))
         self.record('L2','pre_release',check['status'],check['reason'],check,
             action='release' if check['status']=='PASS' else 'align',graph_parents=[held_evidence,support_evidence])
         return check
 
     def _release(self,fn):
-        reason=('lift_task_requires_keep_holding' if self.task=='lift' else
+        reason=('lift_task_requires_keep_holding' if self.task_definition_destination(self.held_object)=='held' else
                 'verified_place_required_before_release' if self.phase!='holding_verified' or self.last_place is None else None)
         self._phase_guard('release',reason is None,reason or 'verified_place_phase_allows_release_check')
         target=self.last_place
@@ -1153,7 +1414,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
         if name=='reobserve_table':return self._reobserve_table(*args,**kwargs,fn=fn)
         if name=='observe_table':
             obj=args[0] if args else kwargs['name']
-            if obj not in ('red cube','green cube') or self.task=='lift' and obj!='red cube':raise ValueError('Unknown task object')
+            self._object_binding(obj)
             self.capture()
             surfaces=self.last_evidence;shape_source=None
             if self.closed and obj==self.held_object:
@@ -1165,7 +1426,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
                     self._stop('current_held_shape_required_for_table_search',metrics={
                         'object':obj,'recoverable':self.terminal_reason is None and self._view_budget()['change_view_available'],
                         'next_action':'observe_held_surface_before_table_search_or_stop',**self._view_budget()})
-                surfaces={**surfaces,obj.split()[0]:held}
+                surfaces={**surfaces,self._object_binding(obj)['sensor_key']:held}
                 # This is the historical geometry used to compute candidate
                 # bounds, not a current pose handle or release authorization.
                 # Refreshing the held pose must not erase a fixed table intent.
@@ -1180,7 +1441,7 @@ class GroundedMonitor(GraphFeedbackMonitor):
                 if r['object']==obj and r['grasp_epoch']==self.grasp_epoch]
             exclusions=[dict(r['region'],id=r['region_id']) for r in rejected]
             options={'excluded_regions':exclusions} if exclusions else {}
-            region=choose_table_region(self.points,self.table_z,surfaces,obj,**options)
+            region=choose_table_region(self.points,self.table_z,surfaces,self._object_binding(obj)['perception_name'],**options)
             if region is None:self._stop('no_observed_clear_table_region',metrics={'recoverable':'reperceive'})
             if shape_source:region['search_shape_source_id']=shape_source
             return self._new('table_region',dict(type='table_region',object=obj,**region),
@@ -1189,6 +1450,10 @@ class GroundedMonitor(GraphFeedbackMonitor):
         if name=='plan_skill':return self._plan_skill(*args,**kwargs)
         if name=='run_plan':return self._run(*args,**kwargs,fn=fn)
         if name=='verify_hold':return self._verify_hold(fn)
+        if name=='prepare_evidence':return self._prepare_evidence(fn)
+        if name=='declare_intent':
+            if not self.conditions:self._stop('task_conditions_not_enabled')
+            return self.conditions.declare(args[0] if args else kwargs['rows'],self.program)
         if name=='verify_task':
             if not self.conditions:self._stop('task_conditions_not_enabled')
             self.capture()
@@ -1225,6 +1490,9 @@ class GroundedMonitor(GraphFeedbackMonitor):
                 self.attachment_id=self.graph.add('verification_fact',{'type':'public_rigid_grasp_attachment',**self.attachment},parents=self.attachment['sources']+[self.last_call])
             if self.fault=='missing_baseline' and not self.fault_fired:self.baseline=None;self.fault_fired=True
             self.record('L2','grasp','UNCERTAIN','jaw_obstruction_requires_lift_or_probe',{'object':self.held_object,'baseline_available':self.baseline is not None})
+            if self.conditions:
+                self.conditions.returned('close_gripper',self.held_object,
+                    self.conditions.destination(self.held_object),self.last_call)
             return None
         if name=='open_gripper':
             if self.closed:return self._release(fn)
@@ -1238,8 +1506,11 @@ class GroundedMonitor(GraphFeedbackMonitor):
 
     def finish_check(self):
         self.capture()
-        candidate=(self.task=='lift' and self.phase=='holding_verified' or
-                   self.task!='lift' and self.phase=='ready' and self.retreat_completed and not self.closed and not self.released)
+        from .task_definition import resolve_definition
+        definition=getattr(self,'task_definition',None) or resolve_definition(self.task)
+        holding_goal=any(k.startswith('holding:') for k in definition['goals'])
+        candidate=(holding_goal and self.phase=='holding_verified' or
+                   not holding_goal and self.phase=='ready' and self.retreat_completed and not self.closed and not self.released)
         conditions=getattr(self,'conditions',None)
         if conditions:candidate=candidate and conditions.complete()
         return self.record('L2','task_candidate','PASS' if candidate else 'UNCERTAIN',
@@ -1249,6 +1520,12 @@ class GroundedMonitor(GraphFeedbackMonitor):
 
     def summary(self):
         value=super().summary()
+        if self.memory:
+            value['state_memory']={obj:dict(status=r.get('current_status',r['status']),source_id=r['node'],
+                evidence_ref=r['evidence_ref'],reason=r.get('invalid_reason'),
+                attached=r['attached'],travel_m=r['path_m'],age_seconds=max(0,time.monotonic()-r['stamp']),
+                current_visual_detection=r.get('current_status')=='DIRECT',model_id=self.memory.profile['calibration_id'])
+                for obj,r in self.memory.records.items()}
         last_guard=next((e for e in reversed(self.events) if e['check']=='dependency_guard'),None)
         allowed={'recoverable','next_action','missing_geometry_objects','reobserve_change_view','region_id','program_error','rejected_region_id','missing_surface_object','perception_failure_behavior','failed_conditions'}
         value['recovery_preconditions']={k:copy.deepcopy(v) for k,v in

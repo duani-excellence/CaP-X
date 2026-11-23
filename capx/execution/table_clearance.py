@@ -20,6 +20,7 @@ def _colour(rgb,name):
 
 def _current_cube_shape(surface):
     if not isinstance(surface,dict):return False
+    if surface.get('evidence_kind')=='predicted' or surface.get('current_visual_detection') is False:return False
     if surface.get('source')=='current_two_visible_vertical_faces_and_top_with_prior_public_cube_side':
         return len(surface.get('face_point_counts',[]))==2
     if surface.get('source')=='current_complete_vertical_face_and_observed_held_bottom':
@@ -29,6 +30,20 @@ def _current_cube_shape(surface):
             and proof.get('complete_current_localization_under_assumptions') is True
             and proof.get('bottom_reference_source')=='current_top_minus_prior_public_side_with_observed_bottom_pixels')
     return False
+
+
+def classify_unresolved_fringe(residual,semantic,other):
+    """One-pixel adjacency diagnoses missing identity; it never removes points.
+
+    An unexplained semantic edge is insufficient evidence of a foreign obstacle
+    or of clearance. Preserve UNKNOWN and request a genuinely different view.
+    Named nonheld pixels always exclude this diagnosis.
+    """
+    from scipy.ndimage import binary_dilation
+    edge=binary_dilation(semantic,structure=np.ones((3,3),bool))&~semantic
+    return dict(all_on_semantic_boundary=bool(residual.any() and not (residual&other).any()
+        and not (residual&~edge).any()),unresolved_pixels=int(residual.sum()),
+        clearance_permission=False,removed_pixels=0)
 
 
 def current_table_evidence(public_obs,region,held_name,held_prediction,robot_geometry,segment_fn,*,
@@ -46,10 +61,12 @@ def current_table_evidence(public_obs,region,held_name,held_prediction,robot_geo
                 nonheld_geometry=nonheld_geometry,static_scene_assumption=static_scene_assumption)
     result=_single_table_evidence(public_obs,region,held_name,held_prediction,robot_geometry,segment_fn,**inputs)
     validation=result['validation'];semantic=result['masks']['held_semantic']
-    eligible=(validation.get('status')=='UNCERTAIN'
-        and validation.get('reason')=='unresolved_nonheld_elevated_points'
+    current_shape=result['evidence'].get('semantic_current_shape',held_prediction)
+    eligible=(validation.get('status') in ('UNCERTAIN','FAIL')
+        and validation.get('reason') in ('unresolved_nonheld_elevated_points','unresolved_held_semantic_boundary',
+                                        'current_nonheld_obstacle_in_table_region')
         and isinstance(held_prediction,dict)
-        and _current_cube_shape(held_prediction)
+        and _current_cube_shape(current_shape)
         and not result['evidence'].get('held_evidence_failure') and semantic.any())
     if eligible and reserve_semantic_refinement is not None:
         camera=next(c for c in public_obs.values() if isinstance(c,dict) and 'images' in c)
@@ -75,7 +92,7 @@ def current_table_evidence(public_obs,region,held_name,held_prediction,robot_geo
                         mapped.append({**candidate,'mask':full})
             except Exception as exc:detail['error_type']=type(exc).__name__
             if mapped:
-                refined=_single_table_evidence(public_obs,region,held_name,held_prediction,robot_geometry,
+                refined=_single_table_evidence(public_obs,region,held_name,current_shape,robot_geometry,
                     lambda *args,**kwargs:mapped,**inputs)
                 detail['refined_validation']=dict(refined['validation'])
                 if not refined['evidence'].get('held_evidence_failure'):
@@ -159,7 +176,22 @@ def _single_table_evidence(public_obs,region,held_name,held_prediction,robot_geo
             selected.append((score,float(np.mean(mask[own])) if own.any() else 0.,-index,actual,fraction))
         if selected:
             chosen=max(selected,key=lambda x:x[:3]);held_mask=chosen[3];semantic_mask=held_mask.copy();segmentation_ok=True
-            held_mask,boundary=_complete_held_boundary(p,held_mask,other,held_prediction,t[:3,3],camera_intrinsics=k,camera_rotation=t[:3,:3])
+            shape=held_prediction
+            if not _current_cube_shape(shape):
+                # The colour screen may discard a visible dark face. Reuse the
+                # SAME current-face fitter on this frame's independently named
+                # SAM3 mask; a rigid prior or mask alone never supplies shape.
+                from .grip_offset import check_surface
+                check=check_surface(held_prediction,surfaces.get(held_name.split()[0]),
+                    points=p[semantic_mask],geometry=dict(frame='robot_base',shape='cube',height_m=height),
+                    camera_origin=t[:3,3])
+                evidence['semantic_shape_check']={k:v for k,v in check.items() if k!='current_surface'}
+                if check['status']=='PASS' and _current_cube_shape(check.get('current_surface')):
+                    shape={**held_prediction,**check['current_surface'],
+                        'evidence_kind':'direct_current_semantic_fit','current_visual_detection':True}
+                    evidence['semantic_current_shape']=shape
+                    evidence['semantic_shape_scope']='current_frame_only_not_validated_memory_anchor'
+            held_mask,boundary=_complete_held_boundary(p,held_mask,other,shape,t[:3,3],camera_intrinsics=k,camera_rotation=t[:3,:3])
             evidence.update(held_mask_score=chosen[0],held_mask_geometry_compatible_fraction=chosen[4],held_mask_pixels=int(held_mask.sum()),held_mask_boundary_refinement=boundary)
     if need_held and not segmentation_ok:evidence['held_evidence_failure']='current_instance_mask_or_rigid_prediction_unavailable'
     held_points=p[held_mask];protected|=held_mask
@@ -207,6 +239,18 @@ def _single_table_evidence(public_obs,region,held_name,held_prediction,robot_geo
     evidence['nonheld_current_evidence']=nonheld_details;evidence['geometry_source_ids']=geometry_sources
     evidence['held_points_removed']=len(held_points);evidence['robot_points_removed']=int(robot_mask.sum());evidence['nonheld_color_points_removed']=0
     validation=validate_table_region(filtered,table,region,held_points=held_points,context=context)
+    if validation.get('reason')=='current_nonheld_obstacle_in_table_region' and semantic_mask.any():
+        near=(np.abs(p[:,:,:2]-region['center'][:2])<=region['footprint_half_extent_xy']).all(-1)
+        residual=near&valid&~robot_mask&~held_mask&(p[:,:,2]>table+.012)
+        other=colours['red cube' if held_name=='green cube' else 'green cube']
+        fringe=classify_unresolved_fringe(residual,semantic_mask,other)
+        from scipy.spatial import cKDTree
+        distances=cKDTree(p[semantic_mask]).query(p[residual])[0]
+        fringe['depth_boundary_compatible']=bool(len(distances) and np.max(distances)<=.002)
+        evidence['unresolved_fringe']=fringe
+        if fringe['all_on_semantic_boundary'] and fringe['depth_boundary_compatible']:
+            validation={**validation,'status':'UNCERTAIN','reason':'unresolved_held_semantic_boundary',
+                'clearance_verified':False}
     if need_held and not segmentation_ok:
         validation={**validation,'status':'UNCERTAIN','reason':'current_held_mask_or_prediction_unavailable','clearance_verified':False}
     masks={'held':held_mask,'held_semantic':semantic_mask,'robot':robot_mask,'valid_depth':valid,'protected_named_color':colours['red cube']|colours['green cube']}

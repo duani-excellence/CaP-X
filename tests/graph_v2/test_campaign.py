@@ -233,7 +233,12 @@ def completed_development_fixture(tmp_path, *, executed=True, mock=False, omit_g
         if omit_group:
             (root/'episodes'/omit_group/'result.json').unlink()
         return {'episodes':rows}
-    run_campaign(dev,runner=pair)
+    # This fixture installs synthetic runtime values (including EGL='fixture').
+    # Keep those inside the mock campaign; later real-renderer tests must see
+    # their original environment. Assertions and campaign semantics unchanged.
+    from unittest.mock import patch
+    with patch.dict('os.environ'):
+        run_campaign(dev,runner=pair)
     # Acceptance points to a real-shaped persisted record in the verified
     # development ledger, not the standalone Oracle-like setup file.
     if not generation_failure and executed and not mock and not omit_group and not different_snapshot:

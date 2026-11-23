@@ -36,11 +36,12 @@ class GroundedRecovery:
         if intent.get('skill')=='place':
             source=m.graph.nodes.get(intent.get('inputs',{}).get('support_surface'),{})
             support=source.get('data',{}).get('object')
-        if support is None and held=='red cube' and m.task in ('stack','restack'):support='green cube'
+        destination=m.task_definition_destination(held)
+        if support is None and destination in m.object_epochs:support=destination
         kind=None
         if m.phase=='released':kind='fresh_retreat'
         elif m.phase=='holding_unverified' and m.closed:kind='verify_grasp'
-        elif m.phase=='holding_verified' and held and m.task!='lift':kind='replace_placement'
+        elif m.phase=='holding_verified' and held and destination!='held':kind='replace_placement'
         elif m.phase=='ready' and m.last_grasp_loss:kind='rebuild_after_grasp_loss'
         decision=None
         conditions=getattr(m,'conditions',None)
@@ -57,7 +58,7 @@ class GroundedRecovery:
             obj=decision.get('object')
             if obj:held=obj
             dest=decision.get('destination')
-            support=dest if dest in ('red cube','green cube') else None
+            support=dest if dest in m.object_epochs else None
         elif conditions and kind is None and m.phase=='ready':
             # Strong G0 keeps completed stage receipts, with the SAME legal
             # sensing/acquisition capabilities. It conservatively handles the
@@ -68,7 +69,7 @@ class GroundedRecovery:
                 if truth=='TRUE':continue
                 kind=('revalidate_effect' if truth=='UNKNOWN' and 'release:'+obj+':'+dest in conditions.history
                       else 'acquire_remaining')
-                held=obj;support=dest if dest in ('red cube','green cube') else None
+                held=obj;support=dest if dest in m.object_epochs else None
                 break
         if kind is None:return None
         key=(kind,held or (m.last_grasp_loss or {}).get('object'),support)
@@ -107,7 +108,7 @@ class GroundedRecovery:
             # No cached PASS authorizes this call. open_gripper rechecks current
             # geometry, versions and permission at its final physical boundary.
             lines.append('open_gripper()');retreat(fresh=True)
-        elif kind=='revalidate_effect':
+        elif kind in ('revalidate_effect','verify_placement'):
             # Re-observation is evidence acquisition, never a repeated release
             # or retreat. Failure leaves the effect UNKNOWN and is bounded.
             lines.append(f'observe_surfaces({held!r})')
@@ -125,11 +126,11 @@ class GroundedRecovery:
             plan('lift',{'robot':r})
         elif kind in ('rebuild_after_grasp_loss','acquire_remaining'):
             obj=held if kind=='acquire_remaining' else m.last_grasp_loss.get('object')
-            if obj not in ('red cube','green cube'):return None
+            if obj not in m.object_epochs:return None
             lines.append('open_gripper()')
             # A lost object may have displaced its neighbor; fresh scene for BOTH
             # policies. Regrasp occurs only through existing sweep/approach gates.
-            for name in (('red cube',) if m.task=='lift' else ('red cube','green cube')):
+            for name in m.object_epochs:
                 # Revalidate an already calibrated, completed nonheld stage
                 # through current surfaces; do not erase its upright calibration
                 # by treating it as a new, unapproached object. Lost-grasp scene
@@ -140,8 +141,8 @@ class GroundedRecovery:
             plan('approach',{'grasp':g});lines.append('close_gripper()')
             r=source('r','robot',None,'read_robot()',fresh=True);plan('lift',{'robot':r})
         else:
-            table=(intent.get('skill')=='table_place' or held=='green cube' and m.task=='restack')
-            if not table and support not in ('red cube','green cube'):return None
+            table=(intent.get('skill')=='table_place' or m.task_definition_destination(held)=='table')
+            if not table and support not in m.object_epochs:return None
             # A known occlusion permits at most one bounded upward observation
             # move per recipe. It is an explicit skill, not reuse of old descent.
             preconditions=feedback.get('recovery_preconditions',{})
@@ -151,6 +152,10 @@ class GroundedRecovery:
                 r=source('view_r','robot',None,'read_robot()',fresh=True)
                 plan('lift',{'robot':r},{'dz':.08})
             changes_view=support_view_required
+            request=getattr(m,'evidence_request',None)
+            if request and request.get('next_work')=='acquire_anchor':
+                lines.append('prepare_evidence()')
+                changes_view=True
             if table:
                 region=preconditions.get('region_id')
                 revalidate=(isinstance(region,str) and preconditions.get('next_action')

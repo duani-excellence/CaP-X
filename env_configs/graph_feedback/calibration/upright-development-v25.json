@@ -1,0 +1,35 @@
+{
+  "schema": "capx.upright_development_bounds.v1",
+  "status": "limited_development_calibration_NOT_unseen_qualification",
+  "offline_evidence": [
+    {
+      "path": "/home/hanyu/dqb/cap-x-20261106/outputs/model_comparison/graph_v25_20261123_190518/initial-shape-calibration-diagnostic.json",
+      "sha256": "ea8d74c223fa7ced4277207c1c18adeb44c76efaae5c412ccafdaf855705da07"
+    }
+  ],
+  "n_initial_shapes": 8,
+  "xy_error_m": 0.01,
+  "z_error_m": 0.006,
+  "shape_range_m": [
+    0.04,
+    0.16,
+    0.11
+  ],
+  "derivation": {
+    "max_xy_containment_deficit_m": 0.005746648336499086,
+    "max_height_error_m": 0.0011073171107137125,
+    "rounding_and_two_pixel_reserve_m": 0.004
+  },
+  "assumptions": [
+    "upright rigid non-deforming shape in measured range",
+    "current RGBD registration at each holding checkpoint",
+    "no release from prediction alone",
+    "same calibrated depth rendering and cameras"
+  ],
+  "limitations": [
+    "8 initial shapes only",
+    "not statistical reliability certificate",
+    "dynamic attachment requires current visible registration",
+    "unseen templates and insertion not qualified"
+  ]
+}

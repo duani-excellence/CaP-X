@@ -1,5 +1,15 @@
 # CaP-X 常用指令速查
 
+V26 的真实 DeepSeek + Vision G0/G1 配对、证据过期压力测试和消融入口见 [V26 使用说明](docs/feedback/graph-v26.md)，结果见 [V26 开发报告](docs/reports/graph-feedback-v26-development-2026-11-23.md)。当前允许技能失败进入模型反馈与恢复，不再以全部 Vision Skill 完整成功作为小规模模型实验的前提；原安全许可和物理评分不变。下面 V24/V25 的 Gate 判断是历史状态，不是 V26 的模型启动限制。
+
+V25 优先复用已下载的 MimicGen 公开长程任务，下载、环境验收、连续示范回放及真实 Vision Skill 命令见 [V25 使用说明](docs/feedback/graph-v25.md)，证据与未完成项见 [V25 报告](docs/reports/graph-feedback-v25-development-2026-11-23.md)。三件装配参考回放成功，但新任务的 Vision 全任务 Gate 与 DeepSeek 消融尚未通过；不要把示范回放当作模型实验。
+
+Graph V24 的通用技能契约、原生多目标/精细任务 Gate 命令见 [V24 说明](docs/feedback/graph-v24.md)和 [开发验收报告](docs/reports/graph-feedback-v24-development-2026-11-23.md)。四物体 PickPlace 与单螺母已有真实 Oracle 成功；新增任务的 Vision 物理技能仍未通过验收，不能据此启动模型配对。
+
+Graph V23.1 的下降前证据检查、误差分解及零新增 LLM 命令见 [V23.1 说明](docs/feedback/graph-v23.1.md)和 [开发报告](docs/reports/graph-feedback-v23.1-development-2026-11-23.md)。真实遮挡预测释放与 Restack 完整成功仍是验收门槛；不要据机制测试启动批量实验。
+
+Graph V23 开发原型与零新增 LLM 复跑命令见 [通用目标与状态记忆](docs/feedback/graph-v23.md)，验收限制见 [V23 报告](docs/reports/graph-feedback-v23-development-2026-11-22.md)。Restack 遮挡释放尚未通过，暂不进入大规模在线采集。
+
 图驱动执行反馈的条件图、局部恢复与当前复跑命令见 [Graph V22 说明](docs/feedback/graph-v22.md)，验收范围见 [V22 开发报告](docs/reports/graph-feedback-v22-development-2026-11-22.md)。原路径和历史结果保留在 [Graph V21 说明](docs/feedback/graph-v2.md#v21-动作准入与有界恢复)、[V21.3 验收报告](docs/reports/graph-feedback-v21-online-resume-2026-11-22.md)和 [早期 V21 报告](docs/reports/graph-feedback-v21-2026-11-22.md)。
 
 Stack 的 DeepSeek + Vision 分层反馈与 A–E 配对实验见 [分层反馈 README](docs/feedback/README.md)。

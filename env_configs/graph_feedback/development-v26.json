@@ -1,0 +1,377 @@
+{
+  "schema": "capx.contract_models.v26",
+  "services": {
+    "sam3": "http://127.0.0.1:18114",
+    "graspnet": "http://127.0.0.1:8215",
+    "pyroki": "http://127.0.0.1:41337"
+  },
+  "runtime_environment": {
+    "MUJOCO_GL": "egl",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "__EGL_VENDOR_LIBRARY_FILENAMES": "/usr/share/glvnd/egl_vendor.d/50_mesa.json",
+    "MUJOCO_EGL_DEVICE_ID": "1",
+    "JAX_PLATFORMS": "cpu",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "tasks": {
+    "pick_place": {
+      "controller": "capx/integrations/robosuite/controllers/config/robots/panda_joint_ctrl.json",
+      "robots": [
+        "Panda"
+      ],
+      "cameras": [
+        "robot0_robotview",
+        "agentview"
+      ],
+      "horizon": 6000,
+      "api_budget": 256,
+      "episode_seconds": 1200,
+      "environment": "PickPlace",
+      "environment_kwargs": {},
+      "objects": [
+        "Milk",
+        "Bread",
+        "Cereal",
+        "Can"
+      ],
+      "perception_queries": {
+        "Milk": "white carton",
+        "Bread": "brown bread",
+        "Cereal": "cereal box",
+        "Can": "red soda can",
+        "container": "wooden bin"
+      },
+      "label": "pick_place",
+      "grasp_depth_m": 0.02,
+      "contract_task": {
+        "schema": "capx.contract_task.v1",
+        "objects": [
+          "Milk",
+          "Bread",
+          "Cereal",
+          "Can",
+          "target-0",
+          "target-1",
+          "target-2",
+          "target-3"
+        ],
+        "resources": [
+          "arm0"
+        ],
+        "goals": [
+          "task_public_verified"
+        ],
+        "intents": [
+          {
+            "id": "operate-0",
+            "skill": "transfer_to_region",
+            "object": "Milk",
+            "target": "target-0",
+            "requires": [
+              "visible:Milk",
+              "geometry:Milk",
+              "target_geometry:0",
+              "robot_ready"
+            ],
+            "effects": [
+              "goal:Milk"
+            ],
+            "resources": [
+              "arm0"
+            ],
+            "after": []
+          },
+          {
+            "id": "operate-1",
+            "skill": "transfer_to_region",
+            "object": "Bread",
+            "target": "target-1",
+            "requires": [
+              "visible:Bread",
+              "geometry:Bread",
+              "target_geometry:1",
+              "robot_ready"
+            ],
+            "effects": [
+              "goal:Bread"
+            ],
+            "resources": [
+              "arm0"
+            ],
+            "after": []
+          },
+          {
+            "id": "operate-2",
+            "skill": "transfer_to_region",
+            "object": "Cereal",
+            "target": "target-2",
+            "requires": [
+              "visible:Cereal",
+              "geometry:Cereal",
+              "target_geometry:2",
+              "robot_ready"
+            ],
+            "effects": [
+              "goal:Cereal"
+            ],
+            "resources": [
+              "arm0"
+            ],
+            "after": []
+          },
+          {
+            "id": "operate-3",
+            "skill": "transfer_to_region",
+            "object": "Can",
+            "target": "target-3",
+            "requires": [
+              "visible:Can",
+              "geometry:Can",
+              "target_geometry:3",
+              "robot_ready"
+            ],
+            "effects": [
+              "goal:Can"
+            ],
+            "resources": [
+              "arm0"
+            ],
+            "after": []
+          },
+          {
+            "id": "verify-all",
+            "skill": "verify_effects",
+            "requires": [
+              "goal:Milk",
+              "goal:Bread",
+              "goal:Cereal",
+              "goal:Can"
+            ],
+            "effects": [
+              "task_public_verified"
+            ],
+            "resources": [],
+            "after": [
+              "operate-0",
+              "operate-1",
+              "operate-2",
+              "operate-3"
+            ],
+            "effect_dependencies": {
+              "task_public_verified": [
+                "goal:Milk",
+                "goal:Bread",
+                "goal:Cereal",
+                "goal:Can"
+              ]
+            },
+            "allow_verified_predecessors": true
+          }
+        ]
+      },
+      "evidence_queries": {
+        "visible:Milk": {
+          "label": "white carton",
+          "camera": "agentview"
+        },
+        "visible:Bread": {
+          "label": "brown bread",
+          "camera": "agentview"
+        },
+        "visible:Cereal": {
+          "label": "cereal box",
+          "camera": "agentview"
+        },
+        "visible:Can": {
+          "label": "red soda can",
+          "camera": "agentview"
+        }
+      },
+      "video_camera": "agentview",
+      "vision_skill": {
+        "error_profile": "env_configs/graph_feedback/calibration/upright-development-v25.json",
+        "bindings": {
+          "Milk": [
+            "white carton",
+            "milk carton",
+            "white box",
+            "gray box",
+            "carton"
+          ],
+          "Bread": "small brown object",
+          "Cereal": "cereal box",
+          "Can": "red soda can"
+        }
+      },
+      "skill_budget": 24,
+      "max_repairs": 6,
+      "max_same_frontier": 2,
+      "max_refreshes": 12
+    }
+  },
+  "development_seeds": [
+    0,
+    21
+  ],
+  "heldout_seeds": [
+    872613,
+    872614
+  ],
+  "note": "Real DeepSeek paired developmental experiments; skill success is NOT an entry gate.",
+  "sources": [
+    "capx/execution/grasp_geometry.py",
+    "capx/execution/grip_offset.py",
+    "capx/execution/feedback.py",
+    "capx/execution/depth_sampling.py",
+    "capx/execution/actor.py",
+    "capx/execution/support_geometry.py",
+    "capx/execution/task_definition.py",
+    "capx/execution/public_geometry.py",
+    "capx/execution/grounded_recovery.py",
+    "capx/execution/dependency_graph.py",
+    "capx/execution/state_memory.py",
+    "capx/execution/evidence_planning.py",
+    "capx/execution/__init__.py",
+    "capx/execution/grounded_feedback.py",
+    "capx/execution/bounded_ik.py",
+    "capx/execution/graph_feedback.py",
+    "capx/execution/control_frames.py",
+    "capx/execution/protocol.py",
+    "capx/execution/task_conditions.py",
+    "capx/execution/grounded_control.py",
+    "capx/execution/skill_contracts.py",
+    "capx/execution/grounded_targets.py",
+    "capx/execution/robot_self_geometry.py",
+    "capx/execution/table_clearance.py",
+    "capx/execution/diagnostic_context.py",
+    "capx/execution/sandbox.py",
+    "capx/execution/public_camera.py",
+    "capx/execution/graph_executive.py",
+    "capx/experiments/graph_v2.py",
+    "capx/experiments/vision_diagnostic_analysis.py",
+    "capx/experiments/graph_preflight.py",
+    "capx/experiments/native_vision.py",
+    "capx/experiments/pilot.py",
+    "capx/experiments/native_tasks.py",
+    "capx/experiments/graph_v2_analysis.py",
+    "capx/experiments/layered_feedback.py",
+    "capx/experiments/graph_campaign.py",
+    "capx/experiments/feedback_analysis.py",
+    "capx/experiments/__init__.py",
+    "capx/experiments/vision_diagnostic.py",
+    "capx/experiments/graph_feedback.py",
+    "capx/experiments/graph_statistics.py",
+    "capx/experiments/shared_initial.py",
+    "capx/experiments/graph_analysis.py",
+    "capx/experiments/graph_replay.py",
+    "capx/experiments/graph_contrast.py",
+    "capx/experiments/graph_mechanism.py",
+    "capx/experiments/graph_power.py",
+    "capx/experiments/vision_tasks.py",
+    "capx/multitask/catalog.py",
+    "capx/multitask/oracles.py",
+    "capx/multitask/__init__.py",
+    "capx/multitask/worker.py",
+    "capx/multitask/runtime.py",
+    "capx/multitask/stack_oracle.py",
+    "capx/multitask/cli.py",
+    "capx/integrations/franka/two_arm_lift.py",
+    "capx/integrations/franka/nut_assembly_privileged.py",
+    "capx/integrations/franka/handover.py",
+    "capx/integrations/franka/libero_privileged.py",
+    "capx/integrations/franka/control_reduced_exampleless.py",
+    "capx/integrations/franka/control_reduced_skill_library.py",
+    "capx/integrations/franka/__init__.py",
+    "capx/integrations/franka/geometry.py",
+    "capx/integrations/franka/libero_reduced_skill_library.py",
+    "capx/integrations/franka/nut_assembly_visual.py",
+    "capx/integrations/franka/control_privileged.py",
+    "capx/integrations/franka/handover_reduced.py",
+    "capx/integrations/franka/libero_reduced.py",
+    "capx/integrations/franka/spill_wipe.py",
+    "capx/integrations/franka/two_arm_lift_privileged.py",
+    "capx/integrations/franka/control.py",
+    "capx/integrations/franka/libero.py",
+    "capx/integrations/franka/handover_reduced_exampleless.py",
+    "capx/integrations/franka/handover_privileged.py",
+    "capx/integrations/franka/control_reduced.py",
+    "capx/integrations/franka/common.py",
+    "capx/integrations/franka/spill_wipe_privileged.py",
+    "capx/integrations/motion/pyroki_context.py",
+    "capx/integrations/motion/__init__.py",
+    "capx/integrations/motion/curobo_api.py",
+    "capx/integrations/motion/curobo.py",
+    "capx/integrations/motion/pyroki.py",
+    "capx/integrations/vision/molmo.py",
+    "capx/integrations/vision/owlvit.py",
+    "capx/integrations/vision/__init__.py",
+    "capx/integrations/vision/sam2.py",
+    "capx/integrations/vision/graspnet.py",
+    "capx/integrations/vision/sam3.py",
+    "capx/envs/simulators/robosuite_nut_assembly.py",
+    "capx/envs/simulators/robosuite_cubes_restack.py",
+    "capx/envs/simulators/robosuite_cube_lift.py",
+    "capx/envs/simulators/franka_real.py",
+    "capx/envs/simulators/r1pro_b1k.py",
+    "capx/envs/simulators/robosuite_base.py",
+    "capx/envs/simulators/robosuite_handover.py",
+    "capx/envs/simulators/robosuite_cubes.py",
+    "capx/envs/simulators/robosuite_spill_wipe.py",
+    "capx/envs/simulators/robosuite_two_arm_lift.py",
+    "capx/envs/simulators/__init__.py",
+    "capx/envs/simulators/libero.py",
+    "capx/utils/parallel_eval.py",
+    "capx/utils/serve_utils.py",
+    "capx/utils/launch_utils.py",
+    "capx/utils/graspnet_utils.py",
+    "capx/utils/execution_logger.py",
+    "capx/utils/request_audit.py",
+    "capx/utils/msgpack_server_client_utils.py",
+    "capx/utils/depth_utils.py",
+    "capx/utils/code_inventory.py",
+    "capx/utils/__init__.py",
+    "capx/utils/camera_utils.py",
+    "capx/utils/eval_utils.py",
+    "capx/utils/visualization_utils.py",
+    "capx/utils/robot_urdf.py",
+    "capx/utils/video_utils.py",
+    "scripts/local/native_task_gate.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/wipe.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/two_arm_lift.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/stack.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/tool_hang.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/manipulation_env.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/pick_place.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/nut_assembly.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/two_arm_handover.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/door.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/__init__.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/two_arm_peg_in_hole.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/two_arm_tape_handover.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/two_arm_transport.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/two_arm_env.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/two_arm_cube_bowl_handover.py",
+    "capx/third_party/robosuite/robosuite/environments/manipulation/lift.py",
+    "capx/experiments/native_reference_graph.py",
+    "capx/execution/region_geometry.py",
+    "capx/execution/vision_skills.py",
+    "capx/experiments/native_vision_skills.py",
+    "env_configs/graph_feedback/calibration/upright-development-v25.json",
+    "capx/execution/contract_recovery.py",
+    "capx/experiments/contract_models.py",
+    "capx/llm/client.py",
+    "capx/llm/providers.py",
+    "capx/experiments/native_vision_skills.py"
+  ],
+  "budgets": {
+    "max_requests": 24,
+    "cost_limit_usd": 5.0,
+    "wall_seconds": 7200,
+    "max_tokens": 32768,
+    "reasoning_effort": "low",
+    "request_timeout": 400,
+    "max_blocks": 4,
+    "block_seconds": 240
+  }
+}

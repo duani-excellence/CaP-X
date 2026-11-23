@@ -14,12 +14,6 @@ from .public_geometry import place_metrics
 from .support_geometry import reliable_top
 
 
-STAGES = {
-    'stack': (('red cube', 'green cube'),),
-    'lift': (('red cube', 'held'),),
-    'restack': (('green cube', 'table'), ('red cube', 'green cube')),
-}
-
 # Executable contracts are paired with the existing numerical/phase gates.
 # A returned motion never, by itself, satisfies its listed physical effects.
 CONTRACTS = {
@@ -44,34 +38,72 @@ CONTRACTS = {
 
 class TaskConditions:
     def __init__(self, graph, task):
-        if task not in STAGES: raise ValueError('Unsupported condition task')
-        self.graph, self.task = graph, task
-        self.stages = STAGES[task]
-        self.ids = {}
-        self.history = {}
-        self.positioned_destinations = {}
-        self.contract = graph.add('capability', {'type':'task_conditions_v22',
-            'task':task, 'stages':self.stages, 'contracts':CONTRACTS,
-            'reward':'independent_evaluator_only'})
-        for key in self.goal_keys:
-            self.set(key, 'UNKNOWN', reason='not_yet_observed')
-        self.goal_node = graph.add('task_goal', {'task':task, 'all_of':self.goal_keys,
-            'ordering':self.stages, 'not_a_reward':True}, parents=[self.contract])
+        from .task_definition import resolve_definition
+        self.definition=resolve_definition(task)
+        self.graph, self.task = graph, self.definition['name']
+        self.stages=tuple((r['object'],r['destination']) for r in self.definition['subgoals'])
+        self.objects=self.definition['objects']
+        self.ids={};self.history={};self.positioned_destinations={}
+        self.contract=graph.add('capability',dict(type='generic_task_contract_v23',
+            definition=self.definition,contracts=CONTRACTS,reward='independent_evaluator_only'))
+        for key in self.goal_keys:self.set(key,'UNKNOWN',reason='not_yet_observed')
+        self.goal_node=graph.add('task_goal',dict(task=self.task,all_of=self.goal_keys,not_a_reward=True),parents=[self.contract])
         self.stage_goals={}
-        previous=None;previous_key=None
-        for obj,dest in self.stages:
-            key='holding:'+obj if dest=='held' else 'placed:'+obj+':'+dest
-            self.stage_goals[key]=graph.add('task_subgoal',{'condition':key,
-                'object':obj,'destination':dest,'completion_requires_public_verification':True,
-                'requires_conditions':[previous_key] if previous_key else [],
-                'previous_stage':previous},parents=[self.goal_node]+([(previous,'precondition')] if previous else []))
-            previous=self.stage_goals[key]
-            previous_key=key
+        rows={r['condition']:r for r in self.definition['subgoals']}
+        def register(row):
+            key=row['condition']
+            if key in self.stage_goals:return self.stage_goals[key]
+            parents=[(register(rows[k]),'precondition') for k in row.get('requires',[])]
+            self.stage_goals[key]=graph.add('task_subgoal',dict(condition=key,object=row['object'],
+                destination=row['destination'],requires_conditions=row.get('requires',[]),
+                completion_requires_public_verification=True),parents=[self.goal_node]+parents)
+            return self.stage_goals[key]
+        for row in self.definition['subgoals']:register(row)
+        self.future_intents={}
+        for row in self.definition['subgoals']:
+            obj,dest=row['object'],row['destination'];previous=None
+            # Generic predicate expansion by legal skill contracts. No task
+            # identity/colour or fault is consulted. Intent is never permission.
+            skills=['approach','close_gripper','lift']
+            if dest!='held':skills+=['table_place' if dest=='table' else 'place','open_gripper','retreat']
+            for skill in skills:
+                key=(skill,obj,dest)
+                parents=[self.stage_goals[row['condition']]]+([(previous,'precondition')] if previous else [])
+                node=graph.add('skill_intent',dict(skill=skill,object=obj,destination=dest,
+                    goal=row['condition'],after=[previous] if previous else [],permission=False,
+                    origin='parent_goal_contract',execution='pending',evidence_contract=CONTRACTS[skill]),parents=parents)
+                self.future_intents[key]=node;previous=node
 
     @property
     def goal_keys(self):
-        if self.task == 'lift': return ['holding:red cube', 'lifted:red cube']
-        return ['placed:red cube:green cube', 'safe_retreat']
+        return list(self.definition['goals'])
+
+    def destination(self,obj):
+        return next((dest for name,dest in self.stages if name==obj),None)
+
+    def required(self,skill,obj):
+        rows=[r for r in self.definition['subgoals'] if r['object']==obj]
+        dependencies=list(rows[0].get('requires',[])) if rows else []
+        return ((['holding:'+str(obj)]+dependencies) if skill in ('place','table_place')
+                else dependencies if skill=='approach' else [])
+
+    def intent(self,skill,obj,dest=None):
+        return self.future_intents.get((skill,obj,dest or self.destination(obj)))
+
+    def declare(self,rows,program):
+        """Validate untrusted future declarations; never change parent goals."""
+        if not isinstance(rows,list) or not 1<=len(rows)<=64:raise ValueError('Bounded intent list required')
+        ids=[];seen=set()
+        for row in rows:
+            if not isinstance(row,dict) or set(row)-{'skill','object','destination','after'}:raise ValueError('Invalid intent fields')
+            skill,obj=row.get('skill'),row.get('object');dest=row.get('destination',self.destination(obj))
+            parent=self.intent(skill,obj,dest)
+            if parent is None or any(type(i) is not int or i not in seen for i in row.get('after',[])):
+                raise ValueError('Intent violates task/skill contract or order')
+            ids.append(self.graph.add('declared_intent',dict(**row,permission=False),
+                parents=[parent,program]+[(ids[i],'precondition') for i in row.get('after',[])]))
+            seen.add(len(ids)-1)
+        return ids
 
     def get(self, key):
         node = self.graph.nodes.get(self.ids.get(key))
@@ -126,11 +158,17 @@ class TaskConditions:
         elif skill in ('release','retreat'):
             dest=self.positioned_destinations.get(obj,dest)
         if skill in ('place','table_place'):self.positioned_destinations[obj]=dest
+        intent=self.intent('open_gripper' if skill=='release' else skill,obj,dest)
+        if intent:
+            self.graph.nodes[intent]['data'].update(execution='returned_awaiting_effect_verification')
+            self.graph._event('intent_execution_receipt',intent_id=intent,call_id=call,
+                plan_id=plan,permission=False,physical_effect_verified=False)
         label = f'{obj}:{dest}'
         name = ('positioned' if skill in ('place','table_place') else skill)+':'+label
         fact = self.graph.add('verification_fact', {'type':'skill_return_receipt',
             'historical_only':True, 'skill':skill, 'object':obj, 'destination':dest,
-            'call_id':call, 'plan_id':plan, 'physical_effect_verified':False}, parents=[call])
+            'call_id':call, 'plan_id':plan, 'intent_id':intent,
+            'physical_effect_verified':False}, parents=[call]+([(intent,'attestation')] if intent else []))
         self.history[name] = fact
         effects = ['aligned:'+label] if skill in ('place','table_place') else (
             ['placed:'+label] if skill=='release' else ['safe_retreat'] if skill=='retreat' else [])
@@ -168,6 +206,9 @@ class TaskConditions:
 
     def check_event(self, m, check, status, fact):
         obj = m.held_object
+        if obj and check=='table_clearance':
+            self.set('clearance:'+obj+':table','TRUE' if status=='PASS' else 'FALSE' if status=='FAIL' else 'UNKNOWN',
+                evidence=[fact],reason='public_table_clearance',epochs={'grasp':m.grasp_epoch})
         if obj and check in ('lift','hold_probe'):
             truth = 'TRUE' if status=='PASS' else 'UNKNOWN'
             for predicate in ('holding','lifted'):
@@ -180,6 +221,7 @@ class TaskConditions:
         evidence = [m.last_call] if m.last_call else []
         self.set('safe_retreat','UNKNOWN',evidence=evidence,reason='robot_moved_since_retreat')
         if m.held_object and (m.closed or name=='open_gripper'):
+            self.set('clearance:'+m.held_object+':table','UNKNOWN',evidence=evidence,reason='motion_expires_clearance')
             for obj,dest in self.stages:
                 if obj==m.held_object:
                     self.set('placed:'+obj+':'+dest,'UNKNOWN',evidence=evidence,reason='object_manipulated')
@@ -217,7 +259,7 @@ class TaskConditions:
             if not reliable_top(surface,geom):
                 # Reuse the existing CURRENT visible-face estimator. Historical
                 # noncontradiction alone cannot certify a post-release effect.
-                surface=m._support_surface(obj,allow_retained=False)
+                surface=m._current_state_surface(obj) if getattr(m,'memory',None) else m._support_surface(obj,allow_retained=False)
             # Select the current object estimate BEFORE defining the table
             # plane reference. Mixing the raw visible centroid with a refined
             # center creates a fictitious lateral placement error. This checks
@@ -226,6 +268,12 @@ class TaskConditions:
                 if dest=='table' and surface is not None and m.table_z is not None
                 else m._support_surface(dest,allow_retained=False) if dest!='table' else None)
             check=place_metrics(surface,support,geom)
+            if surface and surface.get('evidence_kind')=='predicted':
+                from .state_memory import bounded_place_metrics
+                support=m._calibrated_direct_surface(dest) if dest!='table' else None
+                bound={k:m.memory.profile[k] for k in ('xy_m','z_m','height_m')}
+                check=bounded_place_metrics(surface,support,geom,surface['error_bounds'],bound)
+                evidence=list(dict.fromkeys(evidence+[surface['memory_id']]))
             truth={'PASS':'TRUE','FAIL':'FALSE','UNCERTAIN':'UNKNOWN'}[check['status']]
             self.set('placed:'+label,truth,evidence=evidence,epochs=epochs,
                 reason='post_release_'+check['reason'],metrics=check)
@@ -237,7 +285,7 @@ class TaskConditions:
                 self.set('holding:'+m.held_object,'FALSE',evidence=evidence,reason='public_empty_jaws')
 
     def summary(self):
-        return {'schema':'capx.task_conditions.v22','task':self.task,
+        return {'schema':'capx.task_conditions.v23','task':self.task,
             'conditions':[self.get(k) for k in self.ids], 'remaining_goals':self.remaining_goals(),
-            'stages':self.stages, 'completed_receipts':dict(self.history),
+            'stages':self.stages, 'future_intent_ids':list(self.future_intents.values()), 'completed_receipts':dict(self.history),
             'complete_public_candidate':self.complete(), 'is_physical_reward':False}

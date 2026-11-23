@@ -1,0 +1,48 @@
+{
+  "schema": "capx.upstream_task_gate.v1",
+  "upstream": {
+    "url": "https://github.com/NVlabs/mimicgen",
+    "commit": "c0fbff22ba40060f05a917a80817f3f5c20731e7",
+    "license_file": "capx/third_party/mimicgen/LICENSE",
+    "source_only": true
+  },
+  "source_paths": [
+    "capx/third_party/robosuite-mimicgen",
+    "capx/third_party/mimicgen"
+  ],
+  "runtime_environment": {
+    "MUJOCO_GL": "egl",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "__EGL_VENDOR_LIBRARY_FILENAMES": "/usr/share/glvnd/egl_vendor.d/50_mesa.json",
+    "MUJOCO_EGL_DEVICE_ID": "1",
+    "JAX_PLATFORMS": "cpu",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "tasks": [
+    "CoffeePreparation",
+    "ThreePieceAssembly",
+    "Threading"
+  ],
+  "robosuite_source": {
+    "url": "https://github.com/ARISE-Initiative/robosuite",
+    "commit": "b9d8d3de5e3dfd1724f4a0e6555246c460407daa"
+  },
+  "egl_context_source": "capx/third_party/libero_dependencies/robosuite/robosuite/renderers/context/egl_context.py",
+  "reference_data": [
+    {
+      "file": "capx/third_party/mimicgen_reference_data/coffee_preparation.hdf5",
+      "url": "https://huggingface.co/datasets/amandlek/mimicgen_datasets/resolve/33016f8a62c02334f929f2913af8fdd2a8a129e1/source/coffee_preparation.hdf5",
+      "sha256": "9b4201afe44bb5a02eff49b587b2f65ef80696ee635b5f3ef4ba23038183b4ce",
+      "bytes": 74801237,
+      "revision": "33016f8a62c02334f929f2913af8fdd2a8a129e1"
+    },
+    {
+      "file": "capx/third_party/mimicgen_reference_data/three_piece_assembly.hdf5",
+      "url": "https://huggingface.co/datasets/amandlek/mimicgen_datasets/resolve/33016f8a62c02334f929f2913af8fdd2a8a129e1/source/three_piece_assembly.hdf5",
+      "sha256": "e926f303bb703cd21fae082689702df7341163a04984b573d8595ef7ba1dcc13",
+      "bytes": 34033008,
+      "revision": "33016f8a62c02334f929f2913af8fdd2a8a129e1"
+    }
+  ]
+}
