@@ -10,7 +10,7 @@ def analyze(root):
     config=json.loads((Path(root)/'config.json').read_text())
     for file in sorted(Path(root).glob('*/result.json')):
         r=json.loads(file.read_text())
-        if r.get('schema')!='capx.contract_models.v26':continue
+        if r.get('schema') not in ('capx.contract_models.v26','capx.contract_models.v27','capx.contract_models.v28'):continue
         events=[];trace=file.parent/'trace.jsonl'
         if trace.exists():events=[json.loads(x) for x in trace.read_text().splitlines()]
         http=file.parent.parent/(file.parent.name+'-http.jsonl');times=collections.defaultdict(float);counts=collections.Counter()
@@ -38,14 +38,18 @@ def analyze(root):
         restored=None
         if expiry:
             restored=next((i for i in range(expiry[0]+1,len(events)) if events[i]['kind']=='model_contract' and
-                events[i].get('event')=='recovery_evidence' and events[i].get('observed',{}).get(expiry[1],{}).get('truth')=='TRUE'),None)
+                events[i].get('event') in ('recovery_evidence','planned_evidence') and events[i].get('observed',{}).get(expiry[1],{}).get('truth')=='TRUE'),None)
         row={k:r.get(k) for k in ('group','seed','study','ablation','raw_success','reward','seconds','end_to_end_seconds','execution_seconds','api_calls','captures','llm_requests','recovery_llm_requests','input_tokens','output_tokens','cost_usd','last_error','error','fault_triggered','repairs')}
         row.update(native_goals=n,api_per_native_goal=r.get('api_calls',0)/n if n else None,
             api_breakdown=dict(api_names),physical_motion_calls=sum(api_names[k] for k in ('goto_pose','open_gripper','close_gripper','wait')),
             evidence_expiry_restored=restored is not None,
             post_revalidation_motion_calls=sum(e['kind']=='api' and e.get('name') in ('goto_pose','open_gripper','close_gripper','wait') for e in events[restored+1:]) if restored is not None else 0,
             http_counts=dict(counts),http_seconds=dict(times),post_interrupt_progress=recovery_calls,
-            policy_events=[e for e in policy if e.get('event') in ('recovery_evidence','repair_intent','continuation')],
+            policy_events=[e for e in policy if e.get('event') in ('recovery_evidence','repair_intent','continuation','planned_evidence','repair_decision','failed_frontier','bounded_exit')],
+            rejection_counts=dict(collections.Counter(e.get('reason') for e in policy if e.get('event')=='boundary_interrupt')),
+            planned_refreshes=sum(e.get('event')=='planned_evidence' for e in policy),
+            physical_perturbations=[e for e in events if e['kind']=='controlled_physical_disturbance'],
+            stop_reason=r.get('stop_reason'),
             local_alignment_count=sum(e['kind']=='skill_local_alignment' for e in events),
             source=str(file))
         result.append(row)

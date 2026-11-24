@@ -114,7 +114,8 @@ def instrument_tools(env,dest):
                         if isinstance(v,dict):return {str(k):pack(x) for k,x in v.items()}
                         if isinstance(v,(tuple,list)):return [pack(x) for x in v]
                         return v
-                    record=dict(tool=_label,args=pack(args),kwargs=pack(kwargs),response=pack(result),error=error,
+                    from capx.execution.perception_evidence import current_context
+                    record=dict(tool=_label,context=current_context(),args=pack(args),kwargs=pack(kwargs),response=pack(result),error=error,
                                 elapsed_seconds=time.monotonic()-start)
                     dump(path,record)
                     if arrays:np.savez_compressed(path.with_suffix('.npz'),**arrays)

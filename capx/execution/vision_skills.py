@@ -11,6 +11,7 @@ from scipy.spatial.transform import Rotation
 from .skill_contracts import SkillBoundaryStop
 from .region_geometry import region_permission,foreground_component,region_cells
 from .grasp_geometry import cgn_upright_panda,panda_open_sweep
+from .perception_evidence import ExactEvidenceCache,evidence_scope,current_context
 
 
 def jaw_separation(encoders):
@@ -146,16 +147,21 @@ class RegionSkills:
         self.scene=scene;self.motion=motion;self.grasp=grasp;self.reachable=reachable
         self.profile=profile;self.seed=seed;self.emit=emit or (lambda *a,**k:None)
         self.held=None;self.released={};self.effects={};self.phase='empty';self.anchors={};self.targets={}
+        self.plans={};self.condition_rows={};self.active_condition=None;self.motion_version=0
+        self.plan_memory=ExactEvidenceCache(max_entries=8,max_bytes=64*1024*1024)
         if not profile.get('offline_evidence') or profile.get('schema')!='capx.upright_development_bounds.v1':
             raise ValueError('Explicit non-cube offline error evidence required')
 
     def stop(self,reason):
         effects={}
-        if self.held is not None:
+        if self.active_condition:
+            effects[self.active_condition]=dict(truth='UNKNOWN',evidence={'reason':reason,'source':self.scene.source})
+        if self.held is not None and (self.active_condition is None or self.active_condition.startswith('held:')):
             key='held:'+self.held['object'];self.effects[key]='UNKNOWN'
             effects[key]=dict(truth='UNKNOWN',evidence={'reason':reason,'phase':self.phase})
         raise SkillBoundaryStop(reason,effects)
 
+    @evidence_scope
     def verify(self,keys):
         """Current public effect verification, never a cached success lookup.
 
@@ -163,11 +169,40 @@ class RegionSkills:
         depth means UNKNOWN and can revoke a previously verified task condition.
         Private task reward is deliberately unavailable to this verifier.
         """
+        if not keys:return {}
         self.scene.frame();rows={}
+        workspace_attempted=False
         for key in keys:
             truth='UNKNOWN';reason='unsupported_condition'
+            self.active_condition=key
             try:
-                if key=='robot_ready':
+                if key=='workspace_geometry':
+                    workspace_attempted=True
+                    if not self.anchors:self.prepare(capture=False)
+                    else:self.scene.observe_region('source')
+                    truth='TRUE';reason='current_bound_source_region'
+                elif key.startswith('target_geometry:'):
+                    if not self.anchors:self.prepare(capture=False)
+                    cells=region_cells(self.region('destination'),[2,2])
+                    cells[int(key.split(':',1)[1])]
+                    truth='TRUE';reason='current_bounded_target'
+                elif key.startswith('geometry:') or key.startswith('grasp_ready:'):
+                    obj=key.split(':',1)[1]
+                    if workspace_attempted and rows.get('workspace_geometry',{}).get('truth')!='TRUE':
+                        raise ValueError('workspace_geometry_unavailable')
+                    if self.held is not None:raise ValueError('acquisition geometry requires empty hand')
+                    if not self.anchors:self.prepare(capture=False)
+                    if key.startswith('geometry:'):
+                        g=self.scene.object(obj,self.region('source'))
+                        limits=self.profile['shape_range_m']
+                        if not limits[0]<=g['height_m']<=limits[1] or max(g['extent_xy'])>limits[2]:
+                            raise ValueError('Shape outside calibrated capability')
+                        truth='TRUE';reason='current_calibrated_object_geometry'
+                    else:
+                        if rows.get('geometry:'+obj,{}).get('truth')=='UNKNOWN':raise ValueError('object_geometry_unavailable')
+                        self.plans[obj]=(self.scene.serial,self._acquire_plan(obj))
+                        truth='TRUE';reason='current_collision_screened_reachable_grasp'
+                elif key=='robot_ready':
                     truth='TRUE' if self.held is None and np.isfinite(self.scene.obs['robot_joint_pos']).all() else 'FALSE'
                     reason='current_robot_and_attachment_state'
                 elif key.startswith('held:'):
@@ -179,11 +214,23 @@ class RegionSkills:
                     obj=key.split(':',1)[1]
                     if obj in self.released:
                         self.observe_placement(obj);truth='TRUE';reason='current_registered_instance_in_target'
+                    elif self.held is not None and self.held['object']==obj:
+                        truth='FALSE';reason='not_released_from_active_grasp'
+                    else:
+                        if not self.anchors:self.prepare(capture=False)
+                        self.scene.object(obj,self.region('source'))
+                        truth='FALSE';reason='current_instance_in_source_not_target'
             except (SkillBoundaryStop,ValueError) as exc:reason=str(exc)
+            finally:self.active_condition=None
             self.effects[key]=truth
             rows[key]=dict(truth=truth,evidence={'source':self.scene.source,'phase':self.phase,'reason':reason})
+        self.emit('perception_verification',keys=list(keys),source=self.scene.source,context=current_context(),
+            before={k:self.condition_rows.get(k,{}).get('truth','UNKNOWN') for k in keys},
+            after={k:v['truth'] for k,v in rows.items()})
+        self.condition_rows.update(copy.deepcopy(rows))
         return rows
 
+    @evidence_scope
     def observe_placement(self,name):
         item=self.released[name];h=item['attachment'];region=item['region']
         initial=settled_prediction(h['shape'],item['release_transform'],region['floor_z'])
@@ -198,17 +245,24 @@ class RegionSkills:
         if not (np.all(xy>region['lo']) and np.all(xy<region['hi'])):self.stop('Placed instance outside target')
         return shape
 
-    def prepare(self):
-        self.scene.frame();roles=self.scene.bind_regions();self.anchors=copy.deepcopy(roles)
+    @evidence_scope
+    def prepare(self,capture=True):
+        if capture:self.scene.frame()
+        roles=self.scene.bind_regions();self.anchors=copy.deepcopy(roles)
         self.targets={str(i):r for i,r in enumerate(region_cells(roles['destination'],[2,2]))}
         return roles
 
+    @evidence_scope
     def region(self,role):
         try:return self.scene.observe_region(role)
-        except ValueError as exc:self.stop(str(exc))
+        except ValueError as exc:
+            key=self.active_condition or 'workspace_geometry'
+            raise SkillBoundaryStop(str(exc),{key:dict(truth='UNKNOWN',evidence={'source':self.scene.source,'reason':str(exc)})}) from exc
 
+    @evidence_scope
     def move(self,p,q):
         self.motion('goto_pose',np.asarray(p),np.asarray(q))
+        self.motion_version+=1
         for attempt in range(4):
             self.scene.frame()
             tcp=np.asarray(self.scene.obs['robot_cartesian_pos']);error=np.linalg.norm(tcp[:3]-p)
@@ -218,9 +272,11 @@ class RegionSkills:
             if attempt<3:self.motion('wait',.25)
         if error>=.004 or angular>=3:self.stop('physical TCP did not converge')
 
+    @evidence_scope
     def current_held(self):
         h=self.held
         if h is None:self.stop('No established attachment')
+        self.active_condition='held:'+h['object']
         now=pose_matrix(self.scene.obs['robot_cartesian_pos']);prediction=now@np.linalg.inv(h['tcp'])
         proposal=carried_shape(h['shape'],prediction)
         center=np.asarray(proposal['center']);half=np.maximum(.08,np.asarray(proposal['half_extent_xy'])+.03)
@@ -242,11 +298,54 @@ class RegionSkills:
         self.emit('skill_hold_evidence',object=h['object'],registration=reg,gripper_width_m=width)
         if reg['status']!='PASS' or width<.004:self.stop('Hold check failed: '+reg['reason'])
         shape=carried_shape(h['shape'],reg['transform']);self.emit('skill_hold_check',object=h['object'],registration=reg,gripper_width_m=width,shape=shape)
+        self.active_condition=None
         return shape,reg
 
-    def acquire(self,row):
+    @evidence_scope
+    def _acquire_plan(self,name):
+        if not getattr(self.scene,'optimize',False):return self._compute_acquire_plan(name)
+        # An old RGB match alone cannot reuse a motion plan. All fresh public
+        # RGB-D, camera calibration, joints/TCP/jaw and effect state must match.
+        physical_effects={k:v for k,v in self.effects.items() if k.startswith(('held:','placed:'))}
+        key=(name,self.scene.observation_key,self.motion_version,self.phase,
+             ExactEvidenceCache.digest(physical_effects),self.seed)
+        plan,hit,origin=self.plan_memory.get_or_compute(key,lambda:self._compute_acquire_plan(name),self.scene.source)
+        self.emit('perception_plan_reuse',object=name,reused=hit,origin=origin,source=self.scene.source,
+                  observation_key=self.scene.observation_key,context=current_context(),
+                  basis='identical_complete_current_public_observation_and_effects')
+        return plan
+
+    def evidence_features(self,key):
+        """Conservative tool-cost estimate from public skill needs, in seconds.
+
+        Features are shared computations, not safety permissions. The graph
+        may co-observe free future facts; final admission still captures anew.
+        Estimates use measured development tool scales, never private geometry.
+        """
+        f={'capture':.12}
+        def region():f['semantic:receptacles']=.36
+        def obj(name):
+            labels=self.scene.bindings[name];n=len(labels) if isinstance(labels,list) else 1
+            f['semantic:'+name]=.18*4*n;region()
+        if key=='workspace_geometry' or key.startswith('target_geometry:'):region()
+        elif key.startswith('geometry:'):obj(key.split(':',1)[1])
+        elif key.startswith('grasp_ready:'):
+            name=key.split(':',1)[1]
+            for other in self.scene.bindings:
+                if self.effects.get('placed:'+other)!='TRUE':obj(other)
+            f['grasp_ik:'+name]={'cost':1.5,'valid_until':'motion'}
+        elif key.startswith('placed:'):
+            name=key.split(':',1)[1]
+            if name in self.released:f['depth_registration:'+name]=.04
+            elif not self.held or self.held['object']!=name:obj(name)
+        elif key.startswith('held:') and self.held and self.held['object']==key.split(':',1)[1]:
+            name=self.held['object'];obj(name);f['depth_registration:'+name]=.04
+        return f
+
+    @evidence_scope
+    def _compute_acquire_plan(self,name):
         if self.held is not None:self.stop('Cannot acquire while another attachment exists')
-        name=row['object'];self.scene.frame();roles={'source':self.region('source')}
+        roles={'source':self.region('source')}
         try:g=self.scene.object(name,roles['source'])
         except ValueError as exc:self.stop(str(exc))
         limits=self.profile['shape_range_m']
@@ -268,6 +367,10 @@ class RegionSkills:
             rot=Rotation.from_quat(np.roll(q,-1)).as_matrix();xy=np.asarray(g['points'])[:,:2]@rot[:2,1]
             width=float(np.ptp(xy))
             if width+.006>.08:continue
+            self.emit('skill_grasp_projection',object=name,candidate_index=int(i),score=float(scores[i]),
+                raw_world_transform=t.tolist(),projected_tcp=p.tolist(),projected_quaternion=q.tolist(),
+                position_policy='current_shape_center_and_calibrated_inset',
+                raw_translation_used=False,requires_new_collision_and_reachability_check=True)
             candidates.append((float(scores[i]),q,width))
         self.emit('skill_grasp_candidates',object=name,raw_count=len(scores),qualified_width_count=len(candidates),source=self.scene.source)
         geometric=planar_jaw_proposals(g)
@@ -291,6 +394,17 @@ class RegionSkills:
             if self.reachable(p,q) and self.reachable(p+[0,0,.2],q):selected=q;break
         if selected is None:self.stop('No reachable collision-screened grasp')
         q=selected;self.emit('skill_grasp_plan',object=name,position=p.tolist(),quaternion=q.tolist(),shape={k:v for k,v in g.items() if k not in ('points','views')},sweep=sweep)
+        return g,p,q,roles
+
+    @evidence_scope
+    def acquire(self,row):
+        name=row['object']
+        cached=self.plans.pop(name,None)
+        if cached and cached[0]==self.scene.serial:
+            g,p,q,roles=cached[1]
+        else:
+            self.scene.frame();g,p,q,roles=self._acquire_plan(name)
+        self.active_condition='held:'+name
         self.motion('open_gripper');self.move(p+[0,0,.2],q);self.move(p,q)
         self.motion('close_gripper');self.scene.frame();tcp=pose_matrix(self.scene.obs['robot_cartesian_pos'])
         self.held=dict(object=name,points=g['points'],model_points=prism_surface(g),shape={k:v for k,v in g.items() if k not in ('points','views')},tcp=tcp,grasp_quaternion=q)
@@ -299,12 +413,15 @@ class RegionSkills:
         self.phase='closed_unverified';self.move(p+[0,0,.18],q)
         shape,reg=self.current_held()
         if shape['bottom_z']-roles['source']['floor_z']<.10:self.stop('No visible lift effect')
-        self.phase='held_verified';self.effects['held:'+name]='TRUE'
+        self.phase='held_verified';self.effects['held:'+name]='TRUE';self.active_condition=None
 
+    @evidence_scope
     def deposit(self,row):
         name=row['object']
         if self.held is None or self.held['object']!=name:self.stop('Required object is not held')
-        self.scene.frame();shape,reg=self.current_held();destination=self.region('destination')
+        self.active_condition='held:'+name
+        self.scene.frame();shape,reg=self.current_held()
+        self.active_condition='target_geometry:'+str(row['target']);destination=self.region('destination');self.active_condition=None
         region=region_cells(destination,[2,2])[int(row['target'])]
         h=self.held;original=h['shape'];q=np.array([0.,0.,1.,0.]);rot=Rotation.from_quat(np.roll(q,-1)).as_matrix()
         # Full object--TCP transform, including off-centre attachment and yaw.
@@ -359,4 +476,6 @@ class RegionSkills:
         self.effects['placed:'+name]='TRUE' if inside and stable else 'UNKNOWN'
         self.effects['held:'+name]='FALSE'
         self.emit('skill_placement_verified',object=name,inside=inside,stable=bool(stable),source=self.scene.source)
-        if not inside or not stable:self.stop('Placed object not independently observed stable in target')
+        if not inside or not stable:
+            raise SkillBoundaryStop('Placed object not independently observed stable in target',
+                {'placed:'+name:dict(truth='UNKNOWN',evidence={'source':self.scene.source,'inside':inside,'stable':bool(stable)})})

@@ -128,13 +128,18 @@ class ContractGraph:
         for key in row['effects']:
             parents=[self.conditions[k] for k in row.get('effect_dependencies',{}).get(key,[]) if k in self.conditions]
             parents.append((call,'attestation'))
-            self.observe(key,verified_effects.get(key,'UNKNOWN'),dict(call=call,source='parent_verifier'),parents=parents)
+            verified=verified_effects.get(key,'UNKNOWN')
+            truth=verified.get('truth','UNKNOWN') if isinstance(verified,dict) else verified
+            evidence=copy.deepcopy(verified.get('evidence',{})) if isinstance(verified,dict) else {}
+            evidence.update(call=call,verifier='parent_verifier')
+            self.observe(key,truth,evidence,parents=parents)
 
     def abort(self,token,known_effect):
         p=self.permissions.pop(token);self._unlock(token)
         self.stopped.add(p['intent'])
-        self.graph.add('call',dict(intent=p['intent'],returned=False,known_effect=known_effect),parents=[(p['node'],'attestation')],state='done')
+        call=self.graph.add('call',dict(intent=p['intent'],returned=False,known_effect=known_effect),parents=[(p['node'],'attestation')],state='done')
         if not known_effect:self.quarantined=True
+        return call
 
     def recovery_scope(self,missing,group):
         pending=[r for i,r in self.intents.items() if i not in self.completed]
@@ -194,10 +199,11 @@ class ContractBroker:
     only an existing declared intent ID, never supply a truth value or resource
     lease. Multi-motion skills must themselves check their primitive boundaries.
     """
-    def __init__(self,contracts,capabilities,verify,*,max_calls=64,seconds=600,emit=None):
+    def __init__(self,contracts,capabilities,verify,*,max_calls=64,seconds=600,emit=None,sync_invalidates=False):
         self.contracts=contracts;self.capabilities=capabilities;self.verify=verify
         self.max_calls=max_calls;self.calls=0;self.deadline=time.monotonic()+seconds
         self.emit=emit or (lambda row:None)
+        self.sync_invalidates=sync_invalidates
 
     def refresh(self,keys):
         rows=self.verify(list(keys))
@@ -218,16 +224,22 @@ class ContractBroker:
             self.capabilities[row['skill']](copy.deepcopy(row))
             for key in row.get('invalidates',[]):
                 c.observe(key,'UNKNOWN',dict(reason='declared_skill_effect',intent=intent_id))
-            effects=self.verify(row['effects'])
-            c.finish(token,{k:v['truth'] for k,v in effects.items()})
+            keys=list(dict.fromkeys(row['effects']+(row.get('invalidates',[]) if self.sync_invalidates else [])))
+            effects=self.verify(keys)
+            c.finish(token,effects)
+            if self.sync_invalidates:
+                call=c.completed[intent_id]
+                for key in row.get('invalidates',[]):
+                    v=effects.get(key,dict(truth='UNKNOWN',evidence={'reason':'missing_verifier'}))
+                    c.observe(key,v['truth'],v['evidence'],parents=[(call,'attestation')])
             self.emit(dict(intent=intent_id,status='returned',effects=effects,seconds=time.monotonic()-started))
             return dict(effects={k:c.truth(k) for k in row['effects']},call_id=c.completed[intent_id])
         except SkillBoundaryStop as exc:
-            if token in c.permissions:c.abort(token,known_effect=True)
+            call=c.abort(token,known_effect=True) if token in c.permissions else None
             for key in row.get('invalidates',[]):
                 c.observe(key,'UNKNOWN',dict(reason='possible_partial_skill_effect',intent=intent_id))
             for key,value in exc.effects.items():
-                c.observe(key,value['truth'],value['evidence'])
+                c.observe(key,value['truth'],value['evidence'],parents=[(call,'attestation')] if call else [])
             self.emit(dict(intent=intent_id,status='known_boundary_stop',reason=str(exc),
                            effects=exc.effects,seconds=time.monotonic()-started))
             raise

@@ -37,6 +37,10 @@ evidence: dict}}, completed_calls: list[str], stopped_calls: list[str],
 remaining_goals: list[str], phase: str, attachment: str|null, quarantined: bool,
 last_intent: str|null, last_error: str|null, intents: list[contract], repair_count: int}.
 An optional graph_proposal is only a suggestion, never permission.
+When recovery_scope.enforced is true, execute ONLY recovery_scope.allowed_intents.
+Those IDs already include any necessary newly allocated repair. Do not allocate
+another repair or try a failed predecessor. The parent refreshed and checked the
+reported conditions before requesting recovery code.
 Compare state['conditions'].get(key, {}).get('truth', 'UNKNOWN') == 'TRUE';
 NEVER bool(condition_dict). Initial conditions may be empty: execute_skill
 refreshes its live preconditions itself; or use refresh_evidence(intent_id).
@@ -61,8 +65,16 @@ class ModelContractRuntime:
         self.ablation=ablation;self.group=group;self.last_intent=None;self.last_error=None
         self.refreshes=0;self.limit=limits.get('max_refreshes',12);self.reuse=[]
         self.evidence_frontiers={};self.terminal_reason=None
+        self.v27=limits.get('recovery_version',26)>=27
+        self.graph_repair=self.v27 and group=='G1' and ablation!='no_graph_repair'
+        self.condition_evidence=self.graph_repair or (limits.get('recovery_version',26)>=28 and group=='G1')
+        self.costed_evidence=limits.get('recovery_version',26)>=28 and group=='G1' and ablation not in ('no_selective','no_cost')
+        self.failed_frontiers={};self.work_scope=None;self.recovering=False
+        self.actor_frontiers={};self.max_same_frontier=limits.get('max_same_frontier',2)
+        from capx.execution.contract_recovery import ConditionPlanner
+        self.planner=ConditionPlanner(self.c)
         self.broker=ContractBroker(self.c,{'acquire':skills.acquire,'deposit':skills.deposit},skills.verify,
-            max_calls=limits['skill_budget'],seconds=limits['episode_seconds'],emit=self.record)
+            max_calls=limits['skill_budget'],seconds=limits['episode_seconds'],emit=self.record,sync_invalidates=self.v27)
         self.recovery=ContractRecovery(self.c,self.broker,
             group='G0' if ablation=='no_selective' else group,
             max_repairs=limits.get('max_repairs',6),max_same_frontier=limits.get('max_same_frontier',2),emit=self.record)
@@ -87,14 +99,108 @@ class ModelContractRuntime:
             row=c.intents[self.last_intent]
             roots=[c.conditions[k] for k in row.get('requires',[])+row['effects'] if k in c.conditions]
             if roots:state['diagnosis']=c.graph.diagnose(roots,max_nodes=16)
+        if self.v27:
+            state['recovery_scope']=self.work_scope
+            state['graph_repair_enforced']=self.graph_repair
+            state['terminal_reason']=self.terminal_reason
         return state
+
+    def frontier(self,intent):
+        row=self.c.intents[intent]
+        return (row.get('repair_of',intent),self.skills.phase,
+            tuple((k,self.c.truth(k)) for k in sorted(set(row.get('requires',[])+row['effects']))))
+
+    def prepare_recovery(self):
+        '''Parent selects legal work before paying for another actor. No private score.'''
+        if not self.v27:return True
+        self.recovering=True;c=self.c
+        self.planner.motion_epoch(getattr(self.skills,'motion_version',0))
+        if c.quarantined:self.terminal_reason='physical_effect_quarantined';return False
+        remaining=[g for g in c.definition['goals'] if c.truth(g)!='TRUE']
+        # Common capabilities and progress cap; only scope/condition regression differ.
+        if not self.condition_evidence:
+            intent=self.last_intent or next(iter(c.intents))
+            scope=self.recovery.scope(intent)
+            scope=[k for k in scope if self.planner.exhausted.get(k)!=c.truth(k)]
+            if scope:self._planned_refresh(scope)
+        for _ in range(self.limit+1):
+            from capx.execution.graph_executive import GraphExecutive
+            decision=GraphExecutive().repair_contract(c,self.planner)
+            if self.costed_evidence:
+                decision=self.planner.costed_evidence(decision,self.skills.evidence_features)
+            if decision['work']=='evidence':
+                if not self.condition_evidence:break
+                keys=decision['keys']
+                if self.ablation=='no_selective':
+                    keys=self.recovery.scope(self.last_intent or next(iter(c.intents)))
+                    keys=[k for k in keys if self.planner.exhausted.get(k)!=c.truth(k)]
+                if not keys:break
+                self.record(dict(kind='repair_decision',decision=decision,actual_scope=keys))
+                self._planned_refresh(keys);continue
+            break
+        evidence_allowed=[]
+        if self.graph_repair:
+            allowed=decision.get('allowed_intents',[])
+        else:
+            # Strong conservative baseline can select every currently legal unfinished
+            # branch. Completed sibling goals are kept; no graph-selected work lock.
+            allowed=[]
+            def needed(row,seen=()):
+                if row['id'] in seen:return False
+                goal_effects=[k for k in row['effects'] if k in c.definition['goals']]
+                if goal_effects and all(c.truth(k)=='TRUE' for k in goal_effects):return False
+                if any(k in remaining for k in row['effects']):return True
+                return any(any(k in r.get('requires',[]) for k in row['effects']) and needed(r,seen+(row['id'],)) for r in c.definition['intents'])
+            for row in c.definition['intents']:
+                if needed(row) and c.order_satisfied(row) and all(c.truth(k)=='TRUE' for k in row.get('requires',[])) and not all(c.truth(k)=='TRUE' for k in row['effects']):
+                    allowed.append(row['id'])
+                if needed(row) and any(c.truth(k)=='UNKNOWN' and
+                    c.definition.get('condition_specs',{}).get(k,{}).get('observable') and
+                    self.planner.exhausted.get(k)!='UNKNOWN' for k in row.get('requires',[])):
+                    evidence_allowed.append(row['id'])
+        allowed=[i for i in allowed if self.failed_frontiers.get(self.frontier(i),0)==0]
+        new=[]
+        for i in allowed:
+            if i in c.completed or i in c.stopped:
+                try:i=self.recovery.repair(i)
+                except ValueError:continue
+            new.append(i)
+        signature=(self.skills.phase,tuple((k,c.truth(k)) for k in sorted(c.conditions)),
+            tuple(sorted(c.intents[i].get('repair_of',i) for i in new)),tuple(sorted(evidence_allowed)))
+        attempts=self.actor_frontiers.get(signature,0)+1;self.actor_frontiers[signature]=attempts
+        if (new or evidence_allowed) and attempts>self.max_same_frontier:
+            self.terminal_reason='recovery_frontier_unchanged'
+            self.record(dict(kind='bounded_exit',reason=self.terminal_reason,frontier=signature))
+            return False
+        self.work_scope=dict(decision,allowed_intents=new,evidence_allowed_intents=evidence_allowed,enforced=self.graph_repair,
+            policy='condition_regression' if self.graph_repair else 'conservative_or_model_selection')
+        self.record(dict(kind='repair_decision',decision=self.work_scope))
+        if not new and not evidence_allowed:
+            self.terminal_reason='goals_verified' if c.complete() else 'no_legal_recovery_capability'
+            self.record(dict(kind='bounded_exit',reason=self.terminal_reason,decision=self.work_scope))
+            return False
+        return True
+
+    def _planned_refresh(self,keys):
+        if self.refreshes>=self.limit:
+            self.planner.exhaust(keys);return {}
+        self.refreshes+=1;before={k:self.c.truth(k) for k in keys};nodes=dict(self.c.conditions)
+        started=time.monotonic();rows=self.broker.refresh(keys)
+        self.planner.exhaust([k for k in keys if self.c.truth(k)==before[k]])
+        self.record(dict(kind='planned_evidence',scope=keys,before=before,observed=rows,
+            preserved={k:n for k,n in nodes.items() if k not in keys and self.c.truth(k)=='TRUE'},seconds=time.monotonic()-started))
+        return rows
 
     def refresh(self,intent):
         from capx.execution.sandbox import ExecutionInterrupted
         if self.refreshes>=self.limit:
             self.terminal_reason='evidence_budget';raise ExecutionInterrupted('Evidence refresh budget exhausted')
         self.refreshes+=1
+        before={k:self.c.truth(k) for k in self.c.conditions}
         result=self.recovery.refresh_for(intent)
+        if self.v27:
+            self.planner.motion_epoch(getattr(self.skills,'motion_version',0))
+            self.planner.exhaust([k for k in result['scope'] if self.c.truth(k)==before.get(k,'UNKNOWN')])
         if self.ablation=='no_memory':
             keys=[k for k in self.c.definition['goals'] if k in result['preserved']]
             if keys:
@@ -116,7 +222,14 @@ class ModelContractRuntime:
         from capx.execution.skill_contracts import SkillBoundaryStop
         self.last_intent=intent;self.last_error=None
         try:
-            if not self.skills.anchors:
+            if self.v27:
+                if self.failed_frontiers.get(self.frontier(intent),0):
+                    raise ValueError('unchanged failed action frontier; no repeated capture or dispatch')
+                if self.graph_repair and self.recovering:
+                    if self.work_scope is None:self.prepare_recovery()
+                    if intent not in (self.work_scope or {}).get('allowed_intents',[]):
+                        raise ValueError('Action outside parent graph recovery scope')
+            if not self.v27 and not self.skills.anchors:
                 try:self.skills.prepare()
                 except ValueError as exc:raise SkillBoundaryStop(str(exc),{}) from exc
             before=dict(self.c.conditions)
@@ -127,8 +240,12 @@ class ModelContractRuntime:
                       n==self.c.conditions.get(k) and self.c.truth(k)=='TRUE'}
             self.record(dict(kind='continuation',intent=intent,retained_goals_used=retained,
                              remaining=[k for k in self.c.definition['goals'] if self.c.truth(k)!='TRUE']))
+            self.work_scope=None
             return result
         except (SkillBoundaryStop,ValueError) as exc:
+            if self.v27 and intent in self.c.intents:
+                key=self.frontier(intent);self.failed_frontiers[key]=self.failed_frontiers.get(key,0)+1
+                self.record(dict(kind='failed_frontier',intent=intent,signature=key,count=self.failed_frontiers[key]))
             self.last_error=str(exc);self.record(dict(kind='boundary_interrupt',intent=intent,reason=str(exc)))
             raise ExecutionInterrupted(str(exc)) from exc
 
@@ -160,7 +277,15 @@ def ready_continuation(c):
         all(c.truth(k)=='TRUE' for k in row.get('requires',[])) for i,row in c.intents.items())
 
 
-def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study='normal',ablation='none'):
+def shared_boundary_spec(variant,common):
+    """Keep the strict full Snapshot gate; execution policy is separate metadata."""
+    policy={'recovery_version','perception_optimization'}
+    if {k:v for k,v in variant.items() if k not in policy}!={k:v for k,v in common.items() if k not in policy}:
+        raise ValueError('Comparison changed non-policy environment or budget fields')
+    return copy.deepcopy(common)
+
+
+def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study='normal',ablation='none',environment_spec=None):
     from capx.experiments.native_tasks import NativeBoundary,physical_state,physical_reward
     from capx.experiments.native_vision_skills import build_skills,region_task
     from capx.experiments.layered_feedback import validated_program,instrument_tools
@@ -170,9 +295,10 @@ def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study
     boundary=None;start=time.monotonic();rows=[];requests=[];result={};runtime=None;injected=False;generated_here=initial is None;stop_reason='block_budget'
     try:
         with RequestAudit(dest.parent/(dest.name+'-http.jsonl')) as audit:
-            boundary=NativeBoundary(spec,seed,dest,expected_snapshot=expected)
+            boundary=NativeBoundary(shared_boundary_spec(spec,environment_spec or spec),seed,dest,expected_snapshot=expected)
+            save(dest/'runtime-spec.json',spec)
             instrument_tools(boundary,dest)
-            skills=build_skills(boundary,spec);definition=region_task(skills.scene.bindings)
+            skills=build_skills(boundary,spec);definition=region_task(skills.scene.bindings,grounded=spec.get('recovery_version',26)>=27)
             runtime=ModelContractRuntime(skills,definition,group=group,limits=spec,emit=boundary.log,ablation=ablation)
             base=prompt(definition);save(dest/'api-docs.json',dict(text=API_DOC,definition=definition))
             if initial is None:
@@ -189,10 +315,14 @@ def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study
                 value=runtime.execute(intent)
                 # Evaluator-owned evidence-expiry stress. No fault label/hidden
                 # state is passed to policy, and the physics is never mutated.
-                if study=='evidence_expiry' and not injected:
+                if study in ('evidence_expiry','effect_displacement') and not injected:
                     completed_goals=[k for k in definition['goals'] if runtime.c.truth(k)=='TRUE']
                     if completed_goals:
-                        key=completed_goals[0];runtime.c.graph.invalidate([runtime.c.conditions[key]],reason='evidence_expired')
+                        key=completed_goals[0]
+                        if study=='effect_displacement':
+                            from capx.experiments.native_faults import perturb_completed_effect
+                            perturb_completed_effect(boundary,key.split(':',1)[1],config['physical_disturbance'])
+                        runtime.c.graph.invalidate([runtime.c.conditions[key]],reason='evidence_expired')
                         injected=True;boundary.log('controlled_event',event='evidence_expired',condition=key)
                         runtime.last_error='A previously established goal no longer has valid evidence.'
                         raise ExecutionInterrupted(runtime.last_error)
@@ -217,6 +347,7 @@ def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study
                 if block>0 and actor['ok'] and runtime.broker.calls==calls_before and not ready_continuation(runtime.c):
                     stop_reason='model_stopped_without_admissible_continuation';break
                 if block+1==config['budgets']['max_blocks']:break
+                if runtime.v27 and not runtime.prepare_recovery():stop_reason=runtime.terminal_reason;break
                 answer,path=budget.query(recovery_prompt(base,code,actor,runtime.state()),f'{dest.name}-seed-{seed}-recovery-{block+1}')
                 requests.append(path);code=validated_program(answer)
             state=physical_state(boundary.low.robosuite_env)
@@ -235,7 +366,7 @@ def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study
         if runtime:save(dest/'contract-graph.json',dict(nodes=runtime.c.graph.nodes,edges=runtime.c.graph.edges,events=runtime.c.graph.events,policy_events=runtime.events))
         snap=boundary.initial if boundary else expected
         if boundary:boundary.close()
-        result.update(schema='capx.contract_models.v26',group=group,seed=seed,study=study,ablation=ablation,
+        result.update(schema='capx.contract_models.v'+str(min(28,spec.get('recovery_version',26))),group=group,seed=seed,study=study,ablation=ablation,
             mode='real_deepseek_live_vision',initial_code_hash=initial['code_hash'] if initial else None,
             seconds=time.monotonic()-start,blocks=len(rows),request_paths=requests,llm_requests=len(requests),
             recovery_llm_requests=max(0,len(requests)-1),actors=rows,stop_reason=stop_reason)
@@ -254,20 +385,28 @@ def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--config',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True);p.add_argument('--seed',type=int,required=True)
-    p.add_argument('--study',choices=['normal','evidence_expiry'],default='normal')
-    p.add_argument('--ablations',nargs='*',choices=['no_selective','no_future','no_memory'],default=[])
+    p.add_argument('--study',choices=['normal','evidence_expiry','effect_displacement'],default='normal')
+    p.add_argument('--ablations',nargs='*',choices=['no_selective','no_future','no_memory','no_graph_repair','no_cost'],default=[])
+    p.add_argument('--perception-controls',action='store_true',help='Add paired V27 G0/G1 without common perception reuse or cost planning')
+    p.add_argument('--ik-runtime',type=Path,help='Existing start_feedback_ik runtime JSON; override only the IK service URL')
     a=p.parse_args();cfg=json.loads(a.config.read_text())
+    if a.ik_runtime:cfg['services']['pyroki']=json.loads(a.ik_runtime.read_text())['url']
     from capx.experiments.graph_v2 import configure_services
     configure_services(cfg)
     from capx.experiments.graph_campaign import PersistentModelBudget,archive_inventory,verify_source_hashes
     a.output.mkdir(parents=True,exist_ok=False);save(a.output/'config.json',cfg)
     sources=set(cfg['sources'])|{str(a.config)}
+    if a.ik_runtime:sources.add(str(a.ik_runtime))
     hashes={str(Path(x).resolve()):hashlib.sha256(Path(x).read_bytes()).hexdigest() for x in sources}
     save(a.output/'source-archive.json',archive_inventory(a.output,hashes))
     budget=PersistentModelBudget(a.output,cfg['budgets']);initial=snap=None;results=[]
-    for name,group,ablation in [('G0','G0','none'),('G1','G1','none')]+[('G1-'+x,'G1',x) for x in a.ablations]:
+    groups=[('G0','G0','none'),('G1','G1','none')]+[('G1-'+x,'G1',x) for x in a.ablations]
+    if a.perception_controls:groups += [('V27-G0','G0','none'),('V27-G1','G1','none')]
+    for name,group,ablation in groups:
         if verify_source_hashes(hashes):raise RuntimeError('Source drift; stop at complete episode boundary')
-        result,initial,snap=run_episode(a.output/name,cfg['tasks']['pick_place'],a.seed,group,budget,cfg,initial,snap,study=a.study,ablation=ablation)
+        spec=copy.deepcopy(cfg['tasks']['pick_place'])
+        if name.startswith('V27-'):spec.update(recovery_version=27,perception_optimization=False)
+        result,initial,snap=run_episode(a.output/name,spec,a.seed,group,budget,cfg,initial,snap,study=a.study,ablation=ablation,environment_spec=cfg['tasks']['pick_place'])
         results.append(result)
         if initial is None:break
     save(a.output/'summary.json',dict(episodes=results,unique_requests=budget.count,estimated_cost_usd=budget.ledger.spent['deepseek']))

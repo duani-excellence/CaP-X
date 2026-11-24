@@ -1,5 +1,7 @@
 # CaP-X 常用指令速查
 
+V27 的父进程图恢复授权、共同契约修复和真实 DeepSeek 四组消融命令见 [V27 使用说明](docs/feedback/graph-v27.md)，开发结果见 [V27 报告](docs/reports/graph-feedback-v27-development-2026-11-24.md)。该入口在无合法恢复能力或无进展时有界退出；不把受控退出计作物理成功。
+
 V26 的真实 DeepSeek + Vision G0/G1 配对、证据过期压力测试和消融入口见 [V26 使用说明](docs/feedback/graph-v26.md)，结果见 [V26 开发报告](docs/reports/graph-feedback-v26-development-2026-11-23.md)。当前允许技能失败进入模型反馈与恢复，不再以全部 Vision Skill 完整成功作为小规模模型实验的前提；原安全许可和物理评分不变。下面 V24/V25 的 Gate 判断是历史状态，不是 V26 的模型启动限制。
 
 V25 优先复用已下载的 MimicGen 公开长程任务，下载、环境验收、连续示范回放及真实 Vision Skill 命令见 [V25 使用说明](docs/feedback/graph-v25.md)，证据与未完成项见 [V25 报告](docs/reports/graph-feedback-v25-development-2026-11-23.md)。三件装配参考回放成功，但新任务的 Vision 全任务 Gate 与 DeepSeek 消融尚未通过；不要把示范回放当作模型实验。
@@ -318,3 +320,5 @@ uv run --no-sync --active capx/envs/launch.py \
 ```
 
 显存紧张时，把 `franka_robosuite_spill_wipe.yaml` 换成 `franka_robosuite_spill_wipe_privileged.yaml`。
+
+- [V28：感知调用归因、精确证据复用与真实配对消融](docs/feedback/graph-v28.md)

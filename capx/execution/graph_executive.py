@@ -9,6 +9,15 @@ import copy
 
 
 class GraphExecutive:
+    def repair_contract(self, contracts, planner):
+        """Select a condition-regressed frontier; the parent enforces its work scope.
+
+        The stateful planner owns bounded evidence attempts across actor lifetimes.
+        No task/environment identity or evaluator data is available here.
+        """
+        if planner.c is not contracts:raise ValueError('Planner contract ownership mismatch')
+        return planner.plan()
+
     def next_contract(self, contracts, *, excluded=()):
         """Select declared work by conditions and resource constraints, not names.
 

@@ -5,9 +5,11 @@ No privileged fallback, evaluator result, task identifier or simulator state is
 used by localization or contract scheduling.
 """
 from pathlib import Path
+import copy
 import time
 import numpy as np
 from capx.experiments.native_tasks import save
+from capx.execution.perception_evidence import ExactEvidenceCache,current_context,evidence_scope
 
 
 class PublicScene:
@@ -17,15 +19,41 @@ class PublicScene:
     associated geometrically. This class has no simulator or evaluator handle.
     A shape here is a measurement, not a qualified release certificate.
     """
-    def __init__(self,capture,segment,bindings,*,region_query='wooden tray',emit=None):
+    def __init__(self,capture,segment,bindings,*,region_query='wooden tray',emit=None,optimize=False):
         self.capture=capture;self.segment=segment;self.bindings=bindings
         self.region_query=region_query;self.emit=emit or (lambda *a,**k:None)
-        self.roles=None;self.serial=0;self.cache={}
+        self.roles=None;self.serial=0;self.cache={};self.source=None
+        self.optimize=optimize;self.semantic_memory=ExactEvidenceCache();self.query_serial=0
+        self.geometry_cache={};self.object_cache={};self.observation_key=None
 
+    @evidence_scope
     def frame(self):
-        self.obs,self.source=self.capture();self.serial+=1;self.cache={}
+        started=time.monotonic();self.obs,self.source=self.capture();captured=time.monotonic()
+        self.serial+=1;self.cache={}
+        self.geometry_cache={};self.object_cache={};self.observation_key=ExactEvidenceCache.digest(self.obs)
+        self.emit('perception_frame',source=self.source,observation_key=self.observation_key,context=current_context(),
+            capture_and_archive_seconds=captured-started,identity_seconds=time.monotonic()-captured)
         return self.obs
 
+    def _segment(self,image,label,camera,crop=None):
+        self.query_serial+=1;start=time.monotonic()
+        calibration=ExactEvidenceCache.digest({k:v for k,v in self.obs[camera].items() if k!='images'})
+        image_hash=ExactEvidenceCache.digest(image);key=(camera,calibration,label,image_hash)
+        compute=lambda:self.segment(image,text_prompt=label)
+        raw=None;hit=False;origin=self.source;error=None
+        try:
+            if self.optimize:raw,hit,origin=self.semantic_memory.get_or_compute(key,compute,self.source)
+            else:raw,hit,origin=compute(),False,self.source
+            return raw
+        except Exception as exc:error=type(exc).__name__;raise
+        finally:
+            self.emit('perception_request',query_id=self.query_serial,tool='sam3',label=label,camera=camera,
+                crop=crop,image_hash=image_hash,calibration_hash=calibration,source=self.source,
+                reused=hit,origin=origin,seconds=time.monotonic()-start,context=current_context(),error=error,
+                result_count=len(raw) if raw is not None else None,result_hash=ExactEvidenceCache.digest(raw),
+                reuse_basis='identical_current_RGB_and_calibration' if hit else None)
+
+    @evidence_scope
     def candidates(self,label,region=None):
         from capx.execution.region_geometry import instance_masks,deproject,horizontal_pixels,axis_pixels
         if isinstance(label,list):
@@ -34,14 +62,17 @@ class PublicScene:
                 if region is not None:rows=[r for r in rows if self.in_region(r,region)]
                 if not rows:continue
                 centers=np.array([np.median(r['points'],axis=0) for r in rows])
-                if np.max(np.linalg.norm(centers[:,None]-centers[None,:],axis=-1))<=.08:return rows
+                if np.max(np.linalg.norm(centers[:,None]-centers[None,:],axis=-1))<=.08:
+                    self.emit('perception_binding',labels=label,selected=text,source=self.source,context=current_context())
+                    return rows
+            self.emit('perception_binding',labels=label,selected=None,source=self.source,context=current_context())
             return []
-        key=(label,None if region is None else tuple(region['center']))
+        key=(label,None if region is None else (ExactEvidenceCache.digest(region) if self.optimize else tuple(region['center'])))
         if key in self.cache:return self.cache[key]
         result=[]
         for name,camera in self.obs.items():
             if not isinstance(camera,dict) or 'images' not in camera:continue
-            rgb=camera['images']['rgb'];raw=self.segment(rgb,text_prompt=label)
+            rgb=camera['images']['rgb'];raw=self._segment(rgb,label,name)
             if region is not None:
                 import itertools
                 # Public receptacle-guided zoom changes observability, not the
@@ -55,16 +86,23 @@ class PublicScene:
                     b=np.minimum([rgb.shape[1],rgb.shape[0]],np.ceil(uv.max(0))+8).astype(int)
                     if np.all(b-a>32):
                         crop=rgb[a[1]:b[1],a[0]:b[0]]
-                        for row in self.segment(crop,text_prompt=label):
+                        for row in self._segment(crop,label,name,[a.tolist(),b.tolist()]):
                             mask=np.zeros(rgb.shape[:2],bool);mask[a[1]:b[1],a[0]:b[0]]=row['mask']
                             raw.append(dict(row,mask=mask))
                         self.emit('public_region_crop',label=label,camera=name,box=[a.tolist(),b.tolist()],source=self.source)
-            xyz=deproject(camera);depth=camera['images']['depth'].squeeze()
+            if self.optimize:
+                if name not in self.geometry_cache:
+                    xyz=deproject(camera)
+                    self.geometry_cache[name]=(xyz,horizontal_pixels(xyz),[axis_pixels(xyz,a) for a in (0,1)])
+                xyz,horizontal,axes=self.geometry_cache[name]
+            else:xyz=deproject(camera)
+            depth=camera['images']['depth'].squeeze()
             for group in instance_masks(raw):
                 mask=group['mask']&(depth>0)&np.isfinite(xyz).all(-1);points=xyz[mask]
                 if len(points)<30:continue
-                result.append(dict(camera=name,mask=mask,points=points,floor_points=xyz[mask&horizontal_pixels(xyz)],
-                    walls=[(a,xyz[mask&axis_pixels(xyz,a)]) for a in (0,1)],scores=group['scores'],source=self.source))
+                result.append(dict(camera=name,mask=mask,points=points,
+                    floor_points=xyz[mask&(horizontal if self.optimize else horizontal_pixels(xyz))],
+                    walls=[(a,xyz[mask&(axes[a] if self.optimize else axis_pixels(xyz,a))]) for a in (0,1)],scores=group['scores'],source=self.source))
             self.emit('instance_query',label=label,camera=name,raw_scores=[float(r['score']) for r in raw],source=self.source)
         self.cache[key]=result
         return result
@@ -95,6 +133,7 @@ class PublicScene:
         if 'ceiling_z' in region:keep &= (p[:,2]>=region['floor_z'])&(p[:,2]<=region['ceiling_z'])
         return float(np.mean(keep))>.85
 
+    @evidence_scope
     def bind_regions(self):
         regions=self.regions()
         if self.roles is None:
@@ -113,6 +152,7 @@ class PublicScene:
         self.emit('region_roles',roles=self.roles,source=self.source)
         return self.roles
 
+    @evidence_scope
     def observe_region(self,role):
         """Revalidate one known role with current measurements, not all roles.
 
@@ -136,7 +176,17 @@ class PublicScene:
         self.emit('single_region_revalidation',role=role,geometry=self.roles[role],source=self.source)
         return self.roles[role]
 
+    @evidence_scope
     def object(self,name,region=None):
+        key=(name,ExactEvidenceCache.digest(region))
+        if self.optimize and key in self.object_cache:
+            self.emit('perception_geometry_reuse',object=name,source=self.source,kind_of_reuse='same_current_frame_point_cloud',context=current_context())
+            return copy.deepcopy(self.object_cache[key])
+        result=self._object_current(name,region)
+        if self.optimize:self.object_cache[key]=copy.deepcopy(result)
+        return result
+
+    def _object_current(self,name,region=None):
         from capx.execution.region_geometry import upright_shape,foreground_component
         rows=self.candidates(self.bindings[name],region)
         if region is not None:rows=[r for r in rows if self.in_region(r,region)]

@@ -14,14 +14,25 @@ from capx.execution.skill_contracts import ContractGraph,ContractBroker
 from capx.execution.graph_executive import GraphExecutive
 
 
-def region_task(bindings):
+def region_task(bindings,grounded=False):
     rows=[];effects=[]
     for i,obj in enumerate(bindings):
         held='held:'+obj;goal='placed:'+obj;effects.append(goal)
         rows.extend([
             dict(id=f'acquire-{i}',skill='acquire',object=obj,requires=['robot_ready'],effects=[held],invalidates=['robot_ready'],resources=['arm0'],after=[]),
             dict(id=f'deposit-{i}',skill='deposit',object=obj,target=str(i),requires=[held],effects=[goal],invalidates=[held],resources=['arm0'],after=[f'acquire-{i}'],allow_verified_predecessors=True)])
-    return dict(schema='capx.contract_task.v1',objects=list(bindings),resources=['arm0'],goals=effects,intents=rows)
+    result=dict(schema='capx.contract_task.v1',objects=list(bindings),resources=['arm0'],goals=effects,intents=rows)
+    if grounded:
+        specs={k:dict(observable=True) for k in ['robot_ready','workspace_geometry']+effects}
+        for i,obj in enumerate(bindings):
+            acquire,deposit=rows[2*i:2*i+2]
+            acquire['requires'] += ['workspace_geometry','geometry:'+obj,'grasp_ready:'+obj]
+            acquire['invalidates'] += ['geometry:'+obj,'grasp_ready:'+obj]
+            deposit['requires'] += ['target_geometry:'+str(i)]
+            deposit['effects'] += ['robot_ready']
+            for k in acquire['requires']+deposit['requires']:specs[k]=dict(observable=True)
+        result['condition_specs']=specs
+    return result
 
 
 def build_skills(boundary,spec):
@@ -37,7 +48,8 @@ def build_skills(boundary,spec):
         obs,cal=robosuite_pixel_centers(boundary.capture(),depth_sampling=public_depth_sampling(boundary),require_depth_sampling=True)
         index=boundary.captures-1;save(boundary.root/'observations'/f'{index:05d}-calibration.json',cal)
         return obs,str(boundary.root/'observations'/f'{index:05d}-calibration.json')
-    scene=PublicScene(capture,boundary.api.sam3_seg_fn,spec['vision_skill']['bindings'],emit=boundary.log)
+    scene=PublicScene(capture,boundary.api.sam3_seg_fn,spec['vision_skill']['bindings'],emit=boundary.log,
+        optimize=spec.get('perception_optimization',False))
     def reachable(p,q):
         pos,quat=transform_target(boundary.calibration,p,q)
         hand=np.asarray(pos)+Rotation.from_quat(np.roll(quat,-1)).apply(boundary.api._TCP_OFFSET)
