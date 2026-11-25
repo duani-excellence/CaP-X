@@ -159,6 +159,7 @@ class RegionSkills:
         if self.held is not None and (self.active_condition is None or self.active_condition.startswith('held:')):
             key='held:'+self.held['object'];self.effects[key]='UNKNOWN'
             effects[key]=dict(truth='UNKNOWN',evidence={'reason':reason,'phase':self.phase})
+        if hasattr(self,'validation_sink'):self.validation_sink(effects,reason)
         raise SkillBoundaryStop(reason,effects)
 
     @evidence_scope
@@ -261,8 +262,18 @@ class RegionSkills:
 
     @evidence_scope
     def move(self,p,q):
-        self.motion('goto_pose',np.asarray(p),np.asarray(q))
+        receipt=getattr(self,'motion_receipt',None)
+        before=receipt() if receipt else None
+        try:self.motion('goto_pose',np.asarray(p),np.asarray(q))
+        except BaseException:
+            if receipt and receipt()['started']>before['started']:
+                self.motion_version+=1
+                if hasattr(self,'motion_invalidate'):self.motion_invalidate()
+                if self.held and hasattr(self,'validation_sink'):
+                    self.validation_sink({'held:'+self.held['object']:dict(truth='UNKNOWN',evidence={'reason':'partial_motion_requires_hold_revalidation'})})
+            raise
         self.motion_version+=1
+        if hasattr(self,'motion_invalidate'):self.motion_invalidate()
         for attempt in range(4):
             self.scene.frame()
             tcp=np.asarray(self.scene.obs['robot_cartesian_pos']);error=np.linalg.norm(tcp[:3]-p)
@@ -270,6 +281,7 @@ class RegionSkills:
             self.emit('skill_control_check',status='PASS' if error<.004 and angular<3 else 'FAIL',target=list(p),actual=tcp.tolist(),position_error_m=float(error),angle_deg=float(angular),settle_attempt=attempt)
             if error<.004 and angular<3:break
             if attempt<3:self.motion('wait',.25)
+        if hasattr(self,'effect_monitor'):self.effect_monitor(p,q,error<.004 and angular<3)
         if error>=.004 or angular>=3:self.stop('physical TCP did not converge')
 
     @evidence_scope
@@ -315,7 +327,7 @@ class RegionSkills:
         # RGB-D, camera calibration, joints/TCP/jaw and effect state must match.
         physical_effects={k:v for k,v in self.effects.items() if k.startswith(('held:','placed:'))}
         key=(name,self.scene.observation_key,self.motion_version,self.phase,
-             ExactEvidenceCache.digest(physical_effects),self.seed)
+             ExactEvidenceCache.digest(physical_effects),self.seed,getattr(self,'requested_grasp_candidate',None),getattr(self,'future_search_positions',2))
         plan,hit,origin=self.plan_memory.get_or_compute(key,lambda:self._compute_acquire_plan(name),self.scene.source)
         self.emit('perception_plan_reuse',object=name,reused=hit,origin=origin,source=self.scene.source,
                   observation_key=self.scene.observation_key,context=current_context(),
@@ -370,6 +382,23 @@ class RegionSkills:
         if not limits[0]<=g['height_m']<=limits[1] or max(g['extent_xy'])>limits[2]:self.stop('Shape outside calibrated capability')
         transforms,scores,cam=self._propose_grasps(g)
         candidates=[];depth=min(.02,g['height_m']/2);p=np.array(g['center']);p[2]=g['top_z']-depth
+        if hasattr(self,'preplanner'):
+            self.raw_grasp_candidates=getattr(self,'raw_grasp_candidates',{})
+            self.raw_grasp_candidates[name]=[]
+            for i in np.argsort(np.asarray(scores).ravel())[::-1][:8]:
+                raw=cam['pose_mat']@np.asarray(transforms)[i]
+                mapping=np.column_stack([-raw[:3,1],raw[:3,0],raw[:3,2]])
+                full=dict(index=int(i),score=float(scores[i]),raw_base_transform=raw.tolist(),
+                    panda_orientation_wxyz=np.roll(Rotation.from_matrix(mapping).as_quat(),1).tolist(),
+                    raw_translation_minus_projected_tcp_m=(raw[:3,3]-p).tolist(),
+                    source=self.scene.source,permission=False,
+                    status='DIAGNOSTIC_ONLY',missing=['raw CGN origin to Panda TCP translation calibration','non-upright approach contract and collision path'])
+                if hasattr(self,'grasp_hand_to_tcp'):
+                    from .grasp_geometry import cgn_panda_pose
+                    full['unprojected_tcp_hypothesis']=cgn_panda_pose(raw,self.grasp_hand_to_tcp)
+                self.raw_grasp_candidates[name].append(full)
+            self.emit('grasp_6d_diagnostics',object=name,candidates=self.raw_grasp_candidates[name])
+
         # Existing calibrated CGN->Panda axis mapping. Projection changes the
         # candidate, so every projected pose is screened again before motion.
         for i in np.argsort(np.asarray(scores).ravel())[::-1][:32]:
@@ -399,13 +428,29 @@ class RegionSkills:
         # the full currently observed receptacle, minus exact target surfaces.
         neighbors['observed_receptacle']=receptacle_obstacles(
             self.scene.candidates(self.scene.region_query),g['points'])
-        selected=None
+        selected=None;qualified=[];seen=[]
+        requested=getattr(self,'requested_grasp_candidate',None)
         for score,q,width in candidates:
             if hasattr(self,'candidate_filter') and not self.candidate_filter(name,q):continue
+            if any(abs(float(np.dot(q,old)))>1-1e-7 for old in seen):continue
+            seen.append(q)
+            candidate_id='grasp-'+ExactEvidenceCache.digest([name,np.round(p,5),np.round(q,5)])[:20]
+            if requested and requested!=candidate_id:continue
             sweep=panda_open_sweep(p,q,neighbors,z_approach=.20)
             if sweep['status']!='PASS':continue
-            if self.reachable(p,q) and self.reachable(p+[0,0,.2],q):selected=q;break
-        if selected is None:self.stop('No reachable collision-screened grasp')
+            if self.reachable(p,q) and self.reachable(p+[0,0,.2],q):
+                qualified.append(dict(id=candidate_id,q=q,score=score,width=width,sweep=sweep))
+                if not hasattr(self,'preplanner') or requested or len(qualified)>=3:break
+        if not qualified:self.stop('No reachable collision-screened grasp or selected candidate changed')
+        if hasattr(self,'preplanner'):
+            from .preplanning import choose_joint_grasp
+            choice,joint=choose_joint_grasp(self,name,g,p,qualified)
+            self.joint_grasp_search=getattr(self,'joint_grasp_search',{});self.joint_grasp_search[name]=joint
+            self.emit('joint_grasp_placement_search',object=name,candidates=joint,selected=choice['id'] if choice else None,permission=False)
+            if choice is None:self.stop('No joint grasp and future-placement solution in bounded candidates')
+        else:choice=qualified[0]
+        self.selected_grasp_candidate=getattr(self,'selected_grasp_candidate',{});self.selected_grasp_candidate[name]=choice['id']
+        selected=choice['q'];sweep=choice['sweep']
         q=selected;self.emit('skill_grasp_plan',object=name,position=p.tolist(),quaternion=q.tolist(),shape={k:v for k,v in g.items() if k not in ('points','views')},sweep=sweep)
         return g,p,q,roles
 
@@ -436,22 +481,37 @@ class RegionSkills:
         self.scene.frame();shape,reg=self.current_held()
         self.active_condition='target_geometry:'+str(row['target']);destination=self.region('destination');self.active_condition=None
         region=region_cells(destination,[2,2])[int(row['target'])]
-        h=self.held;original=h['shape'];q=np.array([0.,0.,1.,0.]);rot=Rotation.from_quat(np.roll(q,-1)).as_matrix()
-        # Full object--TCP transform, including off-centre attachment and yaw.
-        relative=np.linalg.inv(h['tcp']);local=relative[:3,:3]@original['center']+relative[:3,3]
-        delta=rot@h['tcp'][:3,:3].T;half=np.abs(delta)@np.r_[original['half_extent_xy'],original['height_m']/2]
-        margin=half[:2]+self.profile['xy_error_m']+reg['residual_95_m']+.025
-        lo=np.array(region['lo'])+margin;hi=np.array(region['hi'])-margin
-        if np.any(hi<lo):self.stop('Object uncertainty does not fit target region')
-        positions=[]
-        for alpha in [0.5,.25,.75,0.,1.]:
-            for beta in [.5,.25,.75,0.,1.]:positions.append(lo+(hi-lo)*[alpha,beta])
-        positions.sort(key=lambda xy:np.linalg.norm(xy-np.asarray(shape['center'])[:2]))
-        target=None
-        for xy in positions[:12]:
-            center=np.r_[xy,region['floor_z']+half[2]+.0125];p=center-rot@local
-            if self.reachable(p,q) and self.reachable(p+[0,0,.2],q):target=p;break
-        if target is None:self.stop('No reachable interior placement in bounded search')
+        h=self.held
+        if hasattr(self,'preplanner'):
+            from .preplanning import search_placements
+            search=search_placements(self,row,shape,reg,destination)
+            self.emit('skill_placement_search',object=name,**search)
+            selected=search['selected']
+            if selected is None:self.stop('No solution found in bounded placement search; not proof of physical unreachability')
+            target=np.asarray(selected['position']);q=np.asarray(selected['quaternion_wxyz']);local=np.asarray(selected['attachment_local'])
+        else:
+            h=self.held;original=h['shape'];q=np.asarray(row.get('quaternion_wxyz',[0.,0.,1.,0.]) if getattr(self,'open_runtime',False) else [0.,0.,1.,0.]);rot=Rotation.from_quat(np.roll(q,-1)).as_matrix()
+            # Full object--TCP transform, including off-centre attachment and yaw.
+            relative=np.linalg.inv(h['tcp']);local=relative[:3,:3]@original['center']+relative[:3,3]
+            delta=rot@h['tcp'][:3,:3].T;half=np.abs(delta)@np.r_[original['half_extent_xy'],original['height_m']/2]
+            margin=half[:2]+self.profile['xy_error_m']+reg['residual_95_m']+.025
+            lo=np.array(region['lo'])+margin;hi=np.array(region['hi'])-margin
+            if np.any(hi<lo):self.stop('Object uncertainty does not fit target region')
+            positions=[]
+            for alpha in [0.5,.25,.75,0.,1.]:
+                for beta in [.5,.25,.75,0.,1.]:positions.append(lo+(hi-lo)*[alpha,beta])
+            if getattr(self,'open_runtime',False):
+                from .region_geometry import rank_placements
+                ranked=rank_placements(positions,dict(shape,half_extent_xy=half[:2]),region,preferred=row.get('preferred_xy'))
+                positions=[np.asarray(r['xy']) for r in ranked]
+                self.emit('placement_quality_candidates',object=name,candidates=ranked,
+                    orientation_wxyz=q.tolist(),policy='margin_goal_and_travel',release_threshold_changed=False)
+            else:positions.sort(key=lambda xy:np.linalg.norm(xy-np.asarray(shape['center'])[:2]))
+            target=None
+            for xy in positions[:12]:
+                center=np.r_[xy,region['floor_z']+half[2]+.0125];p=center-rot@local
+                if self.reachable(p,q) and self.reachable(p+[0,0,.2],q):target=p;break
+            if target is None:self.stop('No reachable interior placement in bounded search')
         self.emit('skill_place_plan',object=name,target=target.tolist(),region=region,attachment_local=local.tolist())
         self.move(target+[0,0,.2],q);self.current_held();self.phase='transported'
         self.move(target+[0,0,.05],q);self.current_held()
@@ -489,6 +549,11 @@ class RegionSkills:
         self.effects['placed:'+name]='TRUE' if inside and stable else 'UNKNOWN'
         self.effects['held:'+name]='FALSE'
         self.emit('skill_placement_verified',object=name,inside=inside,stable=bool(stable),source=self.scene.source)
+        if getattr(self,'open_runtime',False):
+            from .region_geometry import rank_placements
+            quality=rank_placements([second['center'][:2]],second,current)[0]
+            self.emit('placement_quality_observed',object=name,quality=quality,source=self.scene.source,
+                frame='robot_base',native_reward_unchanged=True)
         if not inside or not stable:
             raise SkillBoundaryStop('Placed object not independently observed stable in target',
                 {'placed:'+name:dict(truth='UNKNOWN',evidence={'source':self.scene.source,'inside':inside,'stable':bool(stable)})})

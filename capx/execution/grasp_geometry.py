@@ -115,3 +115,22 @@ def panda_open_sweep(position, quaternion_wxyz, neighbor_points, *, opening_m=.0
                             'opening_m': float(opening_m), 'padding_m': float(padding_m),
                             'z_approach_m': float(z_approach)},
             'unverified': ['occluded_volume', 'unknown_objects', 'joint_space_transit', 'grasp_success']}
+
+
+def cgn_panda_pose(transform,hand_to_tcp):
+    """Unprojected candidate under explicit CGN-hand-origin correspondence.
+
+    CGN build_6d_grasp subtracts its gripper_depth (0.1034 m) from the predicted
+    contact midpoint. That origin must not be passed as a TCP position. The
+    configured robot hand-to-TCP translation is applied AFTER the axis mapping.
+    This is an auditable candidate conversion, not a grasp/motion certificate;
+    upstream morphology correspondence still needs physical calibration.
+    """
+    t=np.asarray(transform,float);offset=np.asarray(hand_to_tcp,float)
+    if (t.shape!=(4,4) or offset.shape!=(3,) or not np.isfinite(t).all() or not np.isfinite(offset).all()
+        or not np.allclose(t[3],[0,0,0,1]) or not np.allclose(t[:3,:3].T@t[:3,:3],np.eye(3),atol=1e-5)
+        or np.linalg.det(t[:3,:3])<0):raise ValueError('Rigid grasp transform and configured TCP translation required')
+    r=np.column_stack([-t[:3,1],t[:3,0],t[:3,2]])
+    return dict(position=(t[:3,3]+r@offset).tolist(),quaternion_wxyz=np.roll(Rotation.from_matrix(r).as_quat(),1).tolist(),
+        rotation=r.tolist(),permission=False,assumption='CGN frame origin corresponds to configured Panda hand; not physically calibrated here',
+        source='CGN build_6d_grasp and explicit configured hand-to-TCP translation')

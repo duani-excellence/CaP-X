@@ -15,6 +15,31 @@ import json
 import uuid
 
 
+def program_calls(code):
+    """Describe call sites, never execute Python or invent a total future order.
+
+    Dynamic branches/loops remain actor decisions. Concrete data/contract edges
+    are added by the parent at actual API boundaries. Legacy literal compiler
+    remains available for frozen experiments.
+    """
+    result=[]
+    class Calls(ast.NodeVisitor):
+        conditional=0
+        def visit_Call(self,node):
+            if isinstance(node.func,ast.Name):
+                result.append(dict(name=node.func.id,line=node.lineno,column=node.col_offset,
+                    conditional=bool(self.conditional),predicted_only=True))
+            self.generic_visit(node)
+        def branch(self,node):
+            self.conditional+=1;self.generic_visit(node);self.conditional-=1
+        visit_If=branch
+        visit_For=branch
+        visit_While=branch
+        visit_IfExp=branch
+    Calls().visit(ast.parse(code))
+    return result
+
+
 def program_order(code, known):
     """Bounded literal skill sequences, parsed without executing actor code.
 

@@ -74,6 +74,14 @@ def build_skills(boundary,spec):
             boundary.api.ik_solve_fn(target_pose_wxyz_xyz=np.r_[quat,hand],prev_cfg=boundary.api.cfg)
             return True
         except IKConvergenceError:return False
+    if spec.get('preplanning_version',0)>=35:
+        from capx.execution.preplanning import DiagnosticReachability
+        bounded=boundary.api.ik_solve_fn
+        def hand_target(p,q):
+            pos,quat=transform_target(boundary.calibration,p,q)
+            return np.r_[quat,pos+Rotation.from_quat(np.roll(quat,-1)).apply(boundary.api._TCP_OFFSET)]
+        reachable=DiagnosticReachability(bounded,hand_target,lambda:boundary.api.cfg,
+            calibration=boundary.calibration['calibration_hash'],emit=boundary.log)
     cls=RegionSkills
     if spec.get('skill_recovery_version',29)>=30:
         from capx.execution.skill_recovery import RecoverableRegionSkills
@@ -97,6 +105,33 @@ def build_skills(boundary,spec):
     if spec.get('skill_recovery_version',29)>=30:
         from capx.integrations.vision.graspnet import init_contact_graspnet_point_clouds
         skills.grasp_cloud=init_contact_graspnet_point_clouds()
+    if spec.get('harness_version',0)>=34:
+        skills.open_runtime=True;scene.allow_region_memory=True
+        from capx.execution.robot_self_geometry import PandaSelfGeometry
+        from capx.execution.open_motion import PublicJointSweep
+        urdf=next(x['path'] for x in boundary.calibration['sources'] if x['role']=='ik_urdf')
+        geometry=PandaSelfGeometry(urdf,boundary.calibration)
+        save(boundary.root/'open-robot-geometry.json',geometry.metadata)
+        checker=PublicJointSweep(geometry,scene,boundary.log);solve=boundary.api.ik_solve_fn
+        def checked_solve(*args,**kwargs):
+            result=solve(*args,**kwargs)
+            if getattr(skills,'open_motion_active',False):
+                try:checker(result)
+                except ValueError as exc:
+                    from capx.execution.skill_contracts import SkillBoundaryStop
+                    raise SkillBoundaryStop(str(exc),{}) from exc
+            return result
+        boundary.api.ik_solve_fn=checked_solve
+        if spec.get('motion_backend')=='pyroki_public':
+            from capx.execution.trajectory_execution import SharedTrajectoryMotion
+            skills.shared_trajectory=SharedTrajectoryMotion(boundary,skills,geometry)
+            boundary.goto_pose=skills.shared_trajectory
+            boundary.follow_trajectory=skills.shared_trajectory.execute
+    if spec.get('preplanning_version',0)>=35:
+        from capx.execution.preplanning import SkillPreplanner
+        skills.preplanner=SkillPreplanner(skills)
+        skills.grasp_hand_to_tcp=boundary.calibration['actual_tcp_offset_in_hand_m']
+        skills.decision_encoding=spec.get('decision_encoding','encoded')
     return skills
 
 

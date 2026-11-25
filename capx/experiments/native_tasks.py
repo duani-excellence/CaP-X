@@ -101,6 +101,12 @@ def make_low(spec,seed,render=True):
             self.viser_debug=False
             for _ in range(30):self._step_once()
             self._sim_step_count=0
+        def _do_robosuite_step(self,action):
+            # Actual controller dispatch boundary, after planning/admission.
+            self.dispatch_started=getattr(self,'dispatch_started',0)+1
+            super()._do_robosuite_step(action)
+            self.dispatch_returned=getattr(self,'dispatch_returned',0)+1
+
         def get_observation(self):
             raw=self.robosuite_env._get_observations(force_update=True)
             self._process_camera_observations(raw);self._compute_gripper_obs(raw)
@@ -199,6 +205,18 @@ class NativeBoundary:
         if sink:sink(dict(capture=index,files=files,robot={k:obs[k] for k in ('robot_cartesian_pos','robot_joint_pos','robot_gripper_joint_pos','wrist_ft') if k in obs}))
         return obs
 
+    def dispatch_receipt(self):
+        return dict(started=getattr(self.low,'dispatch_started',0),returned=getattr(self.low,'dispatch_returned',0))
+
+    def reconcile_dispatch(self):
+        # Only public encoders; no object/contact truth enters the monitor.
+        try:
+            data=self.public.get_observation()
+            valid=all(np.isfinite(data[k]).all() for k in ('robot_joint_pos','robot_cartesian_pos','robot_gripper_joint_pos'))
+            self.log('dispatch_reconciled',receipt=self.dispatch_receipt(),public_robot={k:data[k] for k in ('robot_joint_pos','robot_cartesian_pos','robot_gripper_joint_pos')},valid=bool(valid))
+            return bool(valid)
+        except Exception:return False
+
     def goto_pose(self,position,quaternion_wxyz,z_approach=0.):
         from capx.execution.control_frames import transform_target
         pos,quat=transform_target(self.calibration,position,quaternion_wxyz)
@@ -211,8 +229,9 @@ class NativeBoundary:
         """Parent skill registry only; absent from actor RPC capabilities."""
         functions={'goto_pose':self.goto_pose,'open_gripper':self.api.open_gripper,
                    'close_gripper':self.api.close_gripper,'wait':self.wait_control}
+        if hasattr(self,'follow_trajectory'):functions['follow_trajectory']=self.follow_trajectory
         if name not in functions:raise ValueError('Unsupported trusted primitive')
-        self.force_guard=bool(self.force_enabled and name=='goto_pose')
+        self.force_guard=bool(self.force_enabled and name in ('goto_pose','follow_trajectory'))
         try:return self._invoke(name,args,kwargs,functions[name])
         finally:self.force_guard=False
 
@@ -225,13 +244,19 @@ class NativeBoundary:
         if self.calls>=self.spec.get('api_budget',256):raise ExecutionInterrupted('Native episode API budget exhausted')
         if time.monotonic()-self.started>self.spec.get('episode_seconds',900):raise ExecutionInterrupted('Native episode deadline')
         self.calls+=1
-        if name in ('goto_pose','open_gripper','close_gripper','home_pose'):self.motion+=1
+        if name in ('goto_pose','follow_trajectory','open_gripper','close_gripper','home_pose'):self.motion+=1
         before=physical_state(self.low.robosuite_env);started=time.monotonic();error=None;response=None
         try:
             observer=getattr(self,'action_observer',None)
             response=observer(name,args,kwargs,function) if observer else function(*args,**kwargs)
             return response
-        except Exception as exc:error=str(exc);raise
+        except Exception as exc:
+            import traceback
+            error=type(exc).__name__+': '+str(exc)
+            # Parent-only diagnostics; no locals, headers or environment values.
+            self.log('api_exception',name=name,error=error,frames=[dict(file=f.filename,line=f.lineno,function=f.name)
+                for f in traceback.extract_tb(exc.__traceback__)])
+            raise
         finally:self.log('api',name=name,args=args,kwargs=kwargs,response=response,error=error,
                          seconds=time.monotonic()-started,before=before,after=physical_state(self.low.robosuite_env))
 

@@ -185,7 +185,9 @@ class BoundedIK:
                    'solver_calls_used': self.budget.calls, 'solver_calls_limit': self.budget.max_calls,
                    'elapsed_seconds': time.monotonic() - started,
                    'reference_strategy': reference_strategy,
-                   'reference_restarts': reference_restarts, **fields}
+                   'reference_restarts': reference_restarts,
+                   'solver_reference': None if previous is None else previous.tolist(),
+                   'joint_limits': self.kinematics.limits.tolist() if hasattr(self.kinematics,'limits') else None, **fields}
             self.events.append(row)
             self.emit(row)
 

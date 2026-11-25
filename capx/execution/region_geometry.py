@@ -48,11 +48,10 @@ def receptacle_geometry(floor_points,walls):
     """
     fit=horizontal_region(floor_points)
     if fit['status']!='PASS':return fit
-    planes=[]
+    planes=[];diagnostics=[];missing=[]
     for axis in (0,1):
         candidates=[_points(p) for a,p in walls if a==axis]
-        if not candidates:return dict(status='UNKNOWN',reason='missing_observed_wall_axis')
-        p=np.concatenate(candidates);p=p[(p[:,2]>fit['floor_z']+.004)&(p[:,2]<fit['floor_z']+.2)]
+        p=np.concatenate(candidates) if candidates else np.empty((0,3));p=p[(p[:,2]>fit['floor_z']+.004)&(p[:,2]<fit['floor_z']+.2)]
         values,counts=np.unique(np.round(p[:,axis]/.001).astype(int),return_counts=True)
         selected=[]
         for value in values[counts>=100]*.001:
@@ -61,14 +60,42 @@ def receptacle_geometry(floor_points,walls):
             center=float(np.median(q[:,axis]))
             if not any(abs(center-v)<.004 for v in selected):selected.append(center)
         selected.sort()
-        if len(selected)<2 or selected[-1]-selected[0]<.1:
-            return dict(status='UNKNOWN',reason='missing_bounded_wall_pair',axis=axis)
+        diagnostics.append(selected)
+        if len(selected)<2 or selected[-1]-selected[0]<.1:missing.append(axis)
         planes.append(selected)
+    if missing:return dict(status='UNKNOWN',reason='missing_bounded_wall_pair',axis=missing[0],missing_axes=missing,
+        floor=fit,wall_diagnostics=diagnostics,coverage=sum(len(v)>=2 for v in diagnostics)/2)
     return dict(fit,floor_visible_lo=fit['lo'],floor_visible_hi=fit['hi'],
                 lo=[v[0] for v in planes],hi=[v[-1] for v in planes],
                 center=[*[(v[0]+v[-1])/2 for v in planes],fit['floor_z']],
                 wall_planes=planes,source='current_multiview_floor_and_wall_planes',
                 uncertainty='unvalidated_measured_wall_planes')
+
+
+def fuse_region_measurements(old,partial,*,change_check):
+    """History only with current geometric corroboration; no absence-as-proof."""
+    if partial.get('status')=='PASS':return partial
+    if change_check.get('status')!='PASS' or not change_check.get('calibration_unchanged'):return partial
+    floor=partial.get('floor',{})
+    if abs(floor.get('floor_z',float('inf'))-old['floor_z'])>.0015:return partial
+    for axis,values in enumerate(partial.get('wall_diagnostics',[])):
+        if any(min(abs(v-p) for p in old['wall_planes'][axis])>.0015 for v in values):return partial
+    # Caller must have checked all historical bounding faces against fresh raw
+    # depth using the original plane support/residual/span tests.
+    return dict(old,evidence_kind='history_with_current_depth_change_detection',change_check=change_check,
+        current_partial=partial,history_source=old.get('source'))
+
+
+def rank_placements(positions,shape,region,preferred=None):
+    """Interior/goal quality first, distance only a secondary tie breaker."""
+    center=np.asarray(preferred if preferred is not None else (np.asarray(region['lo'])+region['hi'])/2)
+    half=np.asarray(shape['half_extent_xy']);current=np.asarray(shape['center'])[:2];rows=[]
+    for xy in positions:
+        xy=np.asarray(xy);margin=float(min(np.min(xy-half-region['lo']),np.min(np.asarray(region['hi'])-xy-half)))
+        goal=float(np.linalg.norm(xy-center));travel=float(np.linalg.norm(xy-current))
+        rows.append(dict(xy=xy.tolist(),boundary_margin_m=margin,goal_error_m=goal,travel_m=travel,
+            score=2*margin-goal-.1*travel))
+    return sorted(rows,key=lambda r:r['score'],reverse=True)
 
 
 def _points(value):

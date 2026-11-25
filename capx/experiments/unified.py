@@ -39,8 +39,9 @@ class RunSpec(BaseModel):
     snapshot:str|None=None
     reference:str|None=None
     snapshot_group:str='G1'
-    harness:Literal['legacy','persistent']='legacy'
-    recovery_requests:int=Field(default=0,ge=0,le=2)
+    harness:Literal['legacy','persistent','open']='legacy'
+    decision_encoding:Literal['legacy','encoded']|None=None
+    recovery_requests:int=Field(default=0,ge=0,le=12)
     output:str|None=None
     max_requests:int|None=Field(default=None,ge=1)
     cost_limit_usd:float|None=Field(default=None,gt=0)
@@ -57,11 +58,13 @@ class RunSpec(BaseModel):
 
 def capabilities():
     defaults=RunSpec(**local_defaults()).model_dump()
-    return dict(methods=[{'id':m,'available':True,'tasks':['pick_place'] if m=='LOGIV' else (['stack','lift','restack'] if m=='B0' else ['pick_place','stack','lift','restack'])} for m in ('B0','G0','G1','LOGIV')]+
+    return dict(methods=[{'id':m,'available':True,'tasks':['pick_place'] if m=='LOGIV' else ['pick_place','stack','lift','restack'],
+        'variant':'official-core-common-skills-adapter' if m=='LOGIV' else 'program-feedback-minimal-task-adapter' if m=='B0' else 'common-skill-runtime',
+        'note':'PickPlace B0: exact Snapshot, own raw-API program, standalone arm; not an official original reproduction.' if m=='B0' else ''} for m in ('B0','G0','G1','LOGIV')]+
         [dict(id=m,available=False,reason=r,tasks=[]) for m,r in UNAVAILABLE.items()],
         tasks=['pick_place','stack','lift','restack'],providers=[dict(id='deepseek',available=True),dict(id='openai',available=False,reason='Existing graph runner budget/receipt contract is DeepSeek-specific; legacy interactive UI remains available.'),dict(id='local',available=False,reason='No graph-runner request/cost adapter yet.')],
         observations=[dict(id='vision',available=True),dict(id='privileged',available=False,reason='Graph benchmark runners enforce public Vision. Legacy Oracle/Teacher entry remains separate; no silent truth substitution.')],
-        force_modes=['off','on','compare'],skills=['auto','v32','v30','v29','v23'],planners=[dict(id='pyroki',available=True),dict(id='curobo',available=False,reason='V30 actual /plan failed CUDA 804; no qualified replacement backend.')],ablations=list(ABLATIONS),defaults=defaults)
+        force_modes=['off','on','compare'],skills=['auto','raw','v32','v30','v29','v23'],planners=[dict(id='pyroki',available=True),dict(id='curobo',available=False,reason='V30 actual /plan failed CUDA 804; no qualified replacement backend.')],ablations=list(ABLATIONS),defaults=defaults)
 
 def local_defaults():
     path=ROOT/'env_configs/inference/local-v31.json'
@@ -84,7 +87,9 @@ def resolve(spec):
     if not s.seeds or len(set(s.seeds))!=len(s.seeds) or any(type(x)!=int or not 0<=x<2**32 for x in s.seeds):raise ValueError('Unique uint32 Seeds required')
     family='contract' if s.task=='pick_place' else 'grounded'
     if family=='grounded' and s.task not in ('stack','lift','restack'):raise ValueError('Task unavailable in current runners')
-    if family=='contract' and 'B0' in s.methods:raise ValueError('PickPlace has no legal B0 raw-API adapter; do not alias G0 as B0')
+    native_b0=family=='contract' and 'B0' in s.methods
+    if native_b0 and (s.methods!=['B0'] or not s.snapshot or s.reference or s.skill not in ('auto','raw')):
+        raise ValueError('PickPlace B0 requires standalone --methods B0 --snapshot, auto/raw API, and its own initial generation')
     if family=='grounded' and 'LOGIV' in s.methods:raise ValueError('LOGIV adapter currently requires Contract Skills/PickPlace')
     if s.ablation not in ABLATIONS:raise ValueError('Unknown ablation')
     if s.ablation!='none' and 'G1' not in s.methods:raise ValueError('Ablations apply to G1 only')
@@ -93,11 +98,12 @@ def resolve(spec):
     if family=='grounded' and s.scenario not in ('normal','support_refresh','missing_baseline','target_shift'):raise ValueError('Unknown grounded scenario')
     if ('LOGIV' in s.methods or 'B0' in s.methods) and s.scenario!='normal':raise ValueError('This external/B0 adapter lacks an equivalent controlled-fault interface')
     if s.force_mode!='off' and (family!='contract' or any(m not in ('G0','G1') for m in s.methods)):raise ValueError('F/T comparison currently requires PickPlace G0/G1')
-    if s.harness=='persistent' and (family!='contract' or any(m not in ('G0','G1') for m in s.methods)):raise ValueError('Persistent Harness currently supports Contract G0/G1 only')
-    if s.recovery_requests and s.harness!='persistent':raise ValueError('Recovery requests require persistent Harness')
-    if s.skill=='auto':s.skill=('v32' if s.force_mode!='off' else 'v30') if family=='contract' else 'v23'
-    if s.skill not in (('v29','v30','v32') if family=='contract' else ('v23',)):raise ValueError('Skill version does not match runner')
-    if s.harness=='persistent' and s.skill=='v29':raise ValueError('Persistent open recovery requires staged v30/v32 Skills')
+    if s.harness in ('persistent','open') and (family!='contract' or any(m not in ('G0','G1') for m in s.methods)):raise ValueError('Persistent Harness currently supports Contract G0/G1 only')
+    if s.recovery_requests and s.harness not in ('persistent','open'):raise ValueError('Recovery requests require persistent Harness')
+    if s.harness=='persistent' and s.recovery_requests>2:raise ValueError('V33 recovery limit is 2; use open for V34')
+    if s.skill=='auto':s.skill='raw' if native_b0 else ('v32' if s.force_mode!='off' else 'v30') if family=='contract' else 'v23'
+    if s.skill not in (('raw',) if native_b0 else ('v29','v30','v32') if family=='contract' else ('v23',)):raise ValueError('Skill version does not match runner')
+    if s.harness in ('persistent','open') and s.skill=='v29':raise ValueError('Persistent open recovery requires staged v30/v32 Skills')
     if s.force_mode!='off' and s.skill!='v32':raise ValueError('Force feedback requires shared V32 Skills')
     if s.reference and family!='contract':raise ValueError('Use graph_v2 --initial-manifest for provenance-validated grounded replay; unified replay currently Contract only')
     if s.reference and s.snapshot:raise ValueError('Replay reference already owns its Snapshot; do not override')
@@ -105,7 +111,7 @@ def resolve(spec):
     if s.snapshot:
         snap=read(s.snapshot)
         if len(s.seeds)!=1 or snap.get('seed')!=s.seeds[0]:raise ValueError('Snapshot Seed must match the single requested Seed')
-    default=('development-v33.json' if s.harness=='persistent' else 'development-v32.json' if s.skill=='v32' else 'development-v30.json') if family=='contract' else 'development-v31-grounded.json'
+    default=('development-v34.json' if s.harness=='open' else 'development-v33.json' if s.harness=='persistent' else 'development-v32.json' if s.skill=='v32' else 'development-v30.json') if family=='contract' else 'development-v31-grounded.json'
     s.config=str((ROOT/'env_configs/graph_feedback'/default) if s.config is None else Path(s.config).resolve())
     cfg=read(s.config)
     from capx.experiments.graph_campaign import reject_secrets
@@ -120,19 +126,30 @@ def resolve(spec):
         if getattr(s,name) is not None:
             if name=='skill_budget' and family!='contract':raise ValueError('Grounded runner has no Contract skill budget')
             limits[name]=getattr(s,name)
-    if family=='contract':
+    if family=='contract' and not native_b0:
+        if s.harness=='legacy' and any(limits.get(k) for k in ('semantic_version','decision_encoding','motion_backend')):
+            raise ValueError('Configured open-runtime capabilities require --harness open; LOGIV retains its own legacy policy and cannot silently inherit these tools')
         limits['skill_recovery_version']=int(s.skill[1:]);limits['force_feedback']=s.force_mode=='on'
-        if s.harness=='persistent':
-            limits['harness_version']=33;limits['harness_max_requests']=s.recovery_requests
+        if s.harness in ('persistent','open'):
+            limits['harness_version']=34 if s.harness=='open' else 33;limits['harness_max_requests']=s.recovery_requests
             if s.reference and s.recovery_requests:cfg['budgets']['max_requests']=min(cfg['budgets']['max_requests'],s.recovery_requests)
-        elif limits.get('harness_version'):raise ValueError('Persistent config requires --harness persistent')
+        if s.decision_encoding is not None:
+            if s.harness!='open':raise ValueError('Decision encoding requires open runtime')
+            limits['decision_encoding']=s.decision_encoding;limits['preplanning_version']=35
+        elif limits.get('harness_version') and s.harness=='legacy':raise ValueError('Persistent config requires --harness persistent')
     if 'LOGIV' in s.methods:
         if not s.external_logiv:raise ValueError('LOGIV requires --external-logiv pinned official checkout')
         import subprocess
         cfg['external_logiv']=dict(path=str(Path(s.external_logiv).resolve()),revision=subprocess.check_output(['git','-C',s.external_logiv,'rev-parse','HEAD'],text=True).strip())
         from capx.experiments.external_logiv import load_official
         load_official(cfg['external_logiv']['path'],cfg['external_logiv']['revision'])
-    return s,cfg,family
+    if native_b0:
+        frozen=read(s.snapshot)
+        for key in ('api_budget','episode_seconds'):
+            if getattr(s,key) is not None and getattr(s,key)!=frozen.get('spec',{}).get(key):
+                raise ValueError('B0 budget must match Snapshot: '+key)
+        cfg['sources']=list(dict.fromkeys(cfg.get('sources',[])+['capx/experiments/native_b0.py','capx/experiments/graph_v2.py']))
+    return s,cfg,'native_b0' if native_b0 else family
 
 def atomic(path,value):
     path=Path(path);temp=path.with_suffix(path.suffix+'.tmp');temp.write_text(json.dumps(value,ensure_ascii=False,indent=2,allow_nan=False,default=lambda v:v.tolist() if hasattr(v,'tolist') else str(v)));temp.replace(path)
@@ -169,14 +186,22 @@ def execute(spec):
                     if verify_source_hashes(hashes):raise RuntimeError('Source drift before pair')
                     unit=out/f'seed-{seed}-repeat-{repeat}';unit.mkdir();atomic(unit/'config.json',cfg)
                     status(state='running',stage='paired_execution',seed=seed,repeat=repeat,current=str(unit.relative_to(out)))
-                    if family=='contract':
+                    if family=='native_b0':
+                        from capx.experiments.native_b0 import run_episode
+                        budget.prefix=f'seed-{seed}-repeat-{repeat}-'
+                        status(stage='episode',method='B0',current=str((unit/'episodes/B0').relative_to(out)))
+                        row=run_episode(unit,read(s.snapshot),cfg,budget,seed,repeat,hashes)
+                        row.update(artifact=str((unit/'episodes/B0').relative_to(out)))
+                        state['episodes'].append(row);status(requests=budget.count)
+                    elif family=='contract':
                         from capx.experiments.contract_models import run_episode
                         initial=None;snap=read(s.snapshot) if s.snapshot else None;common=copy.deepcopy(cfg['tasks'][s.task])
+                        if snap is not None:common=copy.deepcopy(snap['spec'])
                         if s.reference:
                             ref=Path(s.reference);initial=read(ref/'initial.json');initial['historical_replay']=True
                             snap=read(ref/s.snapshot_group/'snapshot.json')
                             if snap['seed']!=seed:raise ValueError('Historical Snapshot Seed mismatch')
-                            common=read(ref/'config.json')['tasks'][s.task]
+                            common=copy.deepcopy(snap.get('spec',read(ref/'config.json')['tasks'][s.task]))
                             atomic(unit/'initial.json',initial)
                         if not s.reference:budget.prefix=f'seed-{seed}-repeat-{repeat}-'
                         arms=[(method,enabled) for enabled in ([False,True] if s.force_mode=='compare' else [s.force_mode=='on']) for method in s.methods]

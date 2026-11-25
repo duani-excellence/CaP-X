@@ -63,6 +63,8 @@ class ModelContractRuntime:
         from capx.execution.contract_recovery import ContractRecovery
         self.skills=skills;self.c=ContractGraph(definition);self.events=[];self.emit=emit
         self.ablation=ablation;self.group=group;self.last_intent=None;self.last_error=None
+        self.open_runtime=limits.get('harness_version',0)>=34
+        if self.open_runtime:self.agent_recovery=True
         self.refreshes=0;self.limit=limits.get('max_refreshes',12);self.reuse=[]
         self.evidence_frontiers={};self.terminal_reason=None
         self.v27=limits.get('recovery_version',26)>=27
@@ -87,10 +89,112 @@ class ModelContractRuntime:
 
     def compile_program(self,code,source='unattributed_test_program'):
         if not self.v29:return
+        if self.open_runtime:
+            from capx.execution.causal_plan import program_calls
+            node=self.c.register_program(code,source)
+            self.c.graph.add('program_structure',dict(call_sites=program_calls(code),
+                order='dynamic_parent_validated',no_static_total_order=True),parents=[node])
+            from capx.execution.causal_plan import CausalPlan,program_order
+            # Only proven unconditional literal calls become a committed suffix.
+            # Arbitrary Python stays legal; conditional branches remain unexpanded.
+            try:order=program_order(code,self.c.intents)
+            except ValueError:order=[]
+            if self.causal:order=list(dict.fromkeys(self.causal.pending()+order))
+            self.causal=CausalPlan(self.c,order,automatic=self.group=='G1' and self.ablation!='no_causal',
+                previous=self.causal.revision if self.causal else None)
+            self.record(dict(kind='causal_compile',revision=self.causal.revision,order=order,
+                edges=self.causal.edges,scope='instantiated_calls_only_unexpanded_python_is_unknown'))
+            return
         from capx.execution.graph_executive import GraphExecutive
         self.c.register_program(code,source)
         self.causal=GraphExecutive().compile_contract_program(self.c,code,automatic=self.group=='G1' and self.ablation!='no_causal')
         self.record(dict(kind='causal_compile',revision=self.causal.revision,order=self.causal.order,edges=self.causal.edges))
+
+    def qualify_capability(self,key,proposal):
+        """Compile only straight calls to immutable trusted child contracts.
+
+        Unproven branches/computations stay callable Sandbox code, not producers.
+        Effects come from child contracts; model assertions never grant authority.
+        """
+        import ast
+        from capx.execution.causal_plan import required,apply_prediction
+        tree=ast.parse(proposal['code']);body=tree.body[0].body;rows=[]
+        if proposal['inputs']:return dict(status='CALLABLE_ONLY',reason='dynamic binding not statically qualified')
+        if not body or not isinstance(body[-1],ast.Return) or any(isinstance(x,ast.Return) for x in body[:-1]):
+            return dict(status='CALLABLE_ONLY',reason='early return or incomplete macro')
+        for stmt in body:
+            if isinstance(stmt,ast.Return) and isinstance(stmt.value,ast.Dict) and not stmt.value.keys:continue
+            call=stmt.value if isinstance(stmt,ast.Expr) else None
+            if (not isinstance(call,ast.Call) or not isinstance(call.func,ast.Name) or call.func.id!='execute_skill'
+                or call.keywords or len(call.args)!=1 or not isinstance(call.args[0],ast.Constant)
+                or call.args[0].value not in self.c.intents):
+                return dict(status='CALLABLE_ONLY',reason='only statically bound trusted skill composition is qualified')
+            row=copy.deepcopy(self.c.intents[call.args[0].value])
+            if row.get('components') or row.get('after'):return dict(status='CALLABLE_ONLY',reason='nested or history-ordered macro not qualified')
+            rows.append(row)
+        if not 1<=len(rows)<=4:return dict(status='CALLABLE_ONLY',reason='composition size outside finite bound')
+        predicted={};needed={};invalidates=set();resources=set()
+        for row in rows:
+            for k,v in required(row).items():
+                if k in predicted and predicted[k]!=v:return dict(status='CALLABLE_ONLY',reason='incompatible child contracts')
+                if k not in predicted:needed[k]=v
+            predicted=apply_prediction(predicted,row)
+            invalidates.update(row.get('invalidates',[]));resources.update(row.get('resources',[]))
+        effects=[k for k,v in predicted.items() if v=='TRUE']
+        if not set(proposal['expected_effects'])<=set(effects):return dict(status='CALLABLE_ONLY',reason='claimed effects not derived from children')
+        name='registered:'+key
+        contract=dict(id='macro-'+key,skill=name,requires=[k for k,v in needed.items() if v=='TRUE'],
+            requires_false=[k for k,v in needed.items() if v=='FALSE'],effects=effects,
+            deletes=[k for k,v in predicted.items() if v=='FALSE'],invalidates=sorted(invalidates),resources=sorted(resources),
+            components=rows,capability_id=key,cost=sum(float(x.get('cost',1)) for x in rows))
+        if contract['id'] not in self.c.intents:self.c.register(contract);self.library.append(contract)
+        self.c.producer_library=[x for x in self.library if x.get('components')]
+        self.record(dict(kind='registered_contract_composition',contract=contract,qualification='child_contracts_only_not_physical_success'))
+        return dict(status='QUALIFIED_COMPOSITION',intent=contract['id'],requires=needed,effects=effects,permission=False)
+
+    def _execute_composition(self,intent):
+        import uuid
+        from capx.execution.causal_plan import required
+        c=self.c;row=c.intents[intent]
+        if c.quarantined or c.locks or intent in c.completed or intent in c.stopped:raise ValueError('Composition unavailable or already attempted')
+        self.broker.refresh(list(required(row)))
+        if any(c.truth(k)!=v for k,v in required(row).items()):raise ValueError('Missing composition prerequisites')
+        children=[]
+        try:
+            for component in row['components']:
+                child=copy.deepcopy(component);child['id']='macro-child-'+uuid.uuid4().hex
+                child['repair_of']='composition:'+row['capability_id']+':'+component['id']
+                c.register(child)
+                result=self.execute(child['id']);children.append(result['call_id'])
+            effects=self.broker.refresh(list(dict.fromkeys(row['effects']+row.get('deletes',[]))))
+            if any(c.truth(k)!='TRUE' for k in row['effects']):raise ValueError('Composition returned without verified effects')
+            call=c.graph.add('call',dict(intent=intent,components=children,verification=effects),parents=[(n,'attestation') for n in children],state='done')
+            c.completed[intent]=call
+            if self.causal:self.causal.returned(intent,call,'returned')
+            self.record(dict(kind='composed_capability_result',intent=intent,children=children,effects=effects))
+            return dict(effects={k:c.truth(k) for k in row['effects']},call_id=call)
+        except BaseException:
+            c.stopped.add(intent)
+            self.record(dict(kind='composed_capability_stop',intent=intent,completed_prefix=children,replay_prefix=False))
+            raise
+
+    def register_candidate(self,row,result_ref):
+        from capx.execution.causal_plan import required,changes
+        deps=[self.c.conditions[k] for k in required(row) if k in self.c.conditions]
+        node=self.c.graph.add('future_candidate',dict(intent=row['id'],binding=row,expected_effects=changes(row),
+            status='conditional_candidate_not_mandatory_suffix',resources=row.get('resources',[]),permission=False),
+            parents=deps+[result_ref])
+        self.record(dict(kind='future_candidate',intent=row['id'],node=node,result_ref=result_ref))
+        return node
+
+    def _commit_open_call(self,intent):
+        from capx.execution.causal_plan import CausalPlan
+        if not self.open_runtime:return
+        if self.causal is None:self.causal=CausalPlan(self.c,[],automatic=self.group=='G1' and self.ablation!='no_causal')
+        if intent not in self.causal.order:
+            # Selection, not allocation of an alternative candidate, commits work.
+            self.causal=CausalPlan(self.c,[intent]+self.causal.pending(),automatic=self.causal.automatic,previous=self.causal.revision)
+            self.record(dict(kind='causal_selected_call',intent=intent,revision=self.causal.revision))
 
     def deterministic_code(self):
         if not self.v29 or self.ablation=='no_local_repair' or not self.deterministic_intent:return None
@@ -178,9 +282,12 @@ class ModelContractRuntime:
 
     def frontier(self,intent):
         row=self.c.intents[intent]
+        info=getattr(getattr(self,'open_tools',None),'information',{})
+        from capx.execution.agent_events import digest as public_digest
+        info_key=public_digest({k:{m:v[m] for m in ('coverage','wall_diagnostics','missing_axes','residual_95_m') if m in v} for k,v in info.items() if isinstance(v,dict)})
         return (row.get('repair_of',intent),self.skills.phase,
             tuple((k,self.c.truth(k)) for k in sorted(set(row.get('requires',[])+row['effects']))),
-            self.public_motion_frontier() if getattr(self,'harness_active',False) else 0)
+            (info_key if self.open_runtime else self.public_motion_frontier()) if getattr(self,'harness_active',False) else 0)
 
     def public_motion_frontier(self):
         from capx.execution.persistent_harness import public_motion_signature
@@ -303,6 +410,8 @@ class ModelContractRuntime:
         from capx.execution.sandbox import ExecutionInterrupted
         from capx.execution.skill_contracts import SkillBoundaryStop
         self.last_intent=intent;self.last_error=None
+        self._commit_open_call(intent)
+        if self.c.intents.get(intent,{}).get('components'):return self._execute_composition(intent)
         try:
             if self.v29 and self.causal is not None:
                 from capx.execution.causal_plan import required
@@ -321,7 +430,14 @@ class ModelContractRuntime:
                 try:self.skills.prepare()
                 except ValueError as exc:raise SkillBoundaryStop(str(exc),{}) from exc
             before=dict(self.c.conditions)
-            result=self.broker.execute(intent)
+            previous=getattr(self.skills,'requested_grasp_candidate',None)
+            previous_count=getattr(self.skills,'future_search_positions',2)
+            self.skills.requested_grasp_candidate=self.c.intents[intent].get('candidate_id')
+            self.skills.future_search_positions=self.c.intents[intent].get('future_positions',2)
+            try:result=self.broker.execute(intent)
+            finally:
+                self.skills.requested_grasp_candidate=previous
+                self.skills.future_search_positions=previous_count
             # Audit actual retained-goal use: the remaining-work decision after a
             # call consumes these conditions, not just a node-count statistic.
             retained={k:n for k,n in before.items() if k in self.c.definition['goals'] and
@@ -329,6 +445,7 @@ class ModelContractRuntime:
             self.record(dict(kind='continuation',intent=intent,retained_goals_used=retained,
                              remaining=[k for k in self.c.definition['goals'] if self.c.truth(k)!='TRUE']))
             self.work_scope=None
+            if getattr(self,'completion_hook',None):self.completion_hook(intent,result)
             return result
         except (SkillBoundaryStop,ValueError) as exc:
             if self.v27 and intent in self.c.intents:
@@ -338,7 +455,17 @@ class ModelContractRuntime:
             raise ExecutionInterrupted(str(exc)) from exc
 
 
-def prompt(definition):
+def prompt(definition,open_runtime=False,preplanning=False,semantic=False):
+    if open_runtime:
+        from capx.execution.open_recovery import runtime_api_doc
+        OPEN_API_DOC=runtime_api_doc(preplanning=preplanning,semantic=semantic)
+        public=dict(objects=definition['objects'],goals=definition['goals'],
+            bindings=[dict(object=r['object'],target=r.get('target')) for r in definition['intents'] if r['skill']=='deposit'])
+        return [dict(role='system',content='You are a Code-as-Policy robot agent. Generate and execute bounded Python using parent-verified public APIs. Preserve completed physical effects.'),
+            dict(role='user',content=OPEN_API_DOC+'\nPublic task goals and object-to-region-cell bindings:\n'+json.dumps(public)+
+            '\nWrite an autonomous program to complete all goals. Choose observations, computations, plans and bounded branches yourself. '
+            'Use parameterized plan_skill/run_plan and plan_motion when useful; no mandatory fixed skill-ID ordering. '
+            'If a plan returns UNKNOWN/REJECTED, inspect its diagnostic and choose a meaningful alternative. Never infer a permit from a returned dictionary.')]
     return [dict(role='system',content='You are the CaP-X robot coding agent. Use only deployment-observable tools and safe contracts.'),
             dict(role='user',content=API_DOC+'\nPublic task definition:\n'+json.dumps(definition)+
                  '\nFor this INITIAL program choose an order of the declared skills covering all goals, '
@@ -367,7 +494,7 @@ def ready_continuation(c):
 
 def shared_boundary_spec(variant,common):
     """Keep the strict full Snapshot gate; execution policy is separate metadata."""
-    policy={'recovery_version','perception_optimization','skill_recovery_version','force_feedback','force_sensor','harness_version','harness_max_requests'}
+    policy={'recovery_version','perception_optimization','skill_recovery_version','force_feedback','force_sensor','harness_version','harness_max_requests','max_refreshes','preplanning_version','decision_encoding','semantic_version','semantic_store','motion_backend'}
     if {k:v for k,v in variant.items() if k not in policy}!={k:v for k,v in common.items() if k not in policy}:
         raise ValueError('Comparison changed non-policy environment or budget fields')
     return copy.deepcopy(common)
@@ -382,7 +509,7 @@ def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study
     from capx.utils.request_audit import RequestAudit
     before_llm=getattr(budget,'count',0)
     recorded=list(recorded_recoveries or [])
-    if recorded and (spec.get('harness_version')!=33 or any(row.get('origin') not in ('archived_model_program','controlled_public_probe_NOT_LLM') for row in recorded)):
+    if recorded and (spec.get('harness_version') not in (33,34) or any(row.get('origin') not in ('archived_model_program','controlled_public_probe_NOT_LLM') for row in recorded)):
         raise ValueError('Recorded recovery requires persistent Harness and explicit provenance')
     boundary=None;harness=None;start=time.monotonic();rows=[];requests=[];result={};runtime=None;injected=False;generated_here=initial is None;stop_reason='block_budget'
     try:
@@ -399,21 +526,24 @@ def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study
                 recovery_library(definition)
             runtime=ModelContractRuntime(skills,definition,group=group,limits=spec,emit=boundary.log,ablation=ablation)
             if hasattr(skills,'force_graph'):skills.force_graph=runtime.c
-            base=prompt(initial_definition);save(dest/'api-docs.json',dict(text=API_DOC,definition=definition))
+            base=prompt(initial_definition,open_runtime=runtime.open_runtime,preplanning=hasattr(skills,'preplanner'),semantic=spec.get('semantic_version',0)>=36)
+            save(dest/'api-docs.json',dict(text=base[-1]['content'],definition=definition))
             if initial is None:
                 answer,request=budget.query(base,f'initial-{seed}')
                 code=validated_program(answer)
                 initial=dict(code=code,request=request,code_hash=digest(code),prompt_hash=digest(base))
                 save(dest.parent/'initial.json',initial)
-            elif initial['prompt_hash']!=digest(base):raise ValueError('Shared initial prompt drift')
-            requests.append(initial['request']);code=initial['code'];code_origin='real_deepseek'
+            elif initial['prompt_hash']!=digest(base):
+                if not (runtime.open_runtime and initial.get('historical_replay')):raise ValueError('Shared initial prompt drift')
+                save(dest/'historical-prompt-transition.json',dict(old_prompt_hash=initial['prompt_hash'],current_prompt_hash=digest(base),new_initial_generation=False))
+            if initial.get('request'):requests.append(initial['request'])
+            code=initial['code'];code_origin=initial.get('origin','archived_model_program' if initial.get('historical_replay') else 'real_deepseek')
             if external_method is None:runtime.compile_program(code,initial['request'])
             else:runtime.c.register_program(code,initial['request'])
             functions=dict(execute_skill=runtime.execute,execution_state=runtime.state,
                            refresh_evidence=runtime.refresh,repair_skill=runtime.recovery.repair)
-            def dispatch(intent):
+            def completed_effect(intent,value):
                 nonlocal injected
-                value=runtime.execute(intent)
                 # Evaluator-owned evidence-expiry stress. No fault label/hidden
                 # state is passed to policy, and the physics is never mutated.
                 if study in ('evidence_expiry','effect_displacement') and not injected:
@@ -427,11 +557,10 @@ def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study
                         injected=True;boundary.log('controlled_event',event='evidence_expired',condition=key)
                         runtime.last_error='A previously established goal no longer has valid evidence.'
                         raise ExecutionInterrupted(runtime.last_error)
-                return value
-            functions['execute_skill']=dispatch
-            if spec.get('harness_version')==33:
+            runtime.completion_hook=completed_effect
+            if spec.get('harness_version') in (33,34):
                 from capx.execution.persistent_harness import PersistentHarness
-                harness=PersistentHarness(boundary,runtime,budget,request_limit=spec.get('harness_max_requests',2))
+                harness=PersistentHarness(boundary,runtime,budget,request_limit=spec.get('harness_max_requests',2),policy=spec)
                 functions.update(harness.tools.functions())
             boundary.functions=functions
             if external_method:
@@ -489,7 +618,21 @@ def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study
                 api_calls=boundary.calls,captures=getattr(boundary,'captures',0),skill_calls=runtime.broker.calls,
                 completed_calls=list(runtime.c.completed),last_error=runtime.last_error,phase=skills.phase,
                 evidence_refreshes=runtime.refreshes,repairs=runtime.recovery.repairs,actual_http=audit.count,
-                snapshot_hash=boundary.initial['state_hash'],model_hash=boundary.initial['model_hash'],fault_triggered=injected)
+                snapshot_hash=boundary.initial['state_hash'],model_hash=boundary.initial['model_hash'],fault_triggered=injected,
+                scenario_status='normal' if study=='normal' else 'activated' if injected else 'scenario_not_activated',
+                enabled_mechanisms=dict(open_runtime=runtime.open_runtime,causal_plan=runtime.causal is not None,
+                    automatic_causal=bool(runtime.causal and runtime.causal.automatic),local_repair=runtime.ablation!='no_local_repair',
+                    resume_validation=runtime.ablation!='no_resume_validation',condition_regression=runtime.condition_evidence,costed_evidence=runtime.costed_evidence))
+            # Configured != exercised. Publish auditable occurrences separately.
+            from collections import Counter
+            counts=Counter(e.get('kind') for e in runtime.events)
+            result['actual_active_mechanisms']=dict(
+                causal_selected_calls=counts['causal_selected_call'],future_candidates=counts['future_candidate'],
+                causal_repair_decisions=counts['causal_repair_decision'],
+                deterministic_continuations=counts['deterministic_continuation'],
+                condition_repair_decisions=counts['repair_decision'],planned_evidence=counts['planned_evidence'],
+                composed_capability_results=counts['composed_capability_result'],
+                evidence='contract-graph.json policy_events; counts are use, not effectiveness')
             result['force_feedback']=bool(spec.get('force_feedback',False))
             result['force_decisions']=len(getattr(skills,'force_decisions',[]))
     except Exception as exc:
@@ -503,7 +646,7 @@ def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study
         if harness:
             result['stop_reason']=stop_reason
             harness.finish(result)
-            result['harness']=dict(version=33,events=harness.store.sequence,recovery_requests=harness.supervisor.requests,
+            result['harness']=dict(version=spec['harness_version'],events=harness.store.sequence,recovery_requests=harness.supervisor.requests,
                 no_progress=harness.supervisor.no_progress,unresolved_calls=harness.store.unresolved())
         if boundary:boundary.close()
         result.update(schema='capx.contract_models.v'+str(max(min(29,spec.get('recovery_version',26)),spec.get('skill_recovery_version',0))),group=group,seed=seed,study=study,ablation=ablation,
@@ -511,12 +654,13 @@ def run_episode(dest,spec,seed,group,budget,config,initial,expected=None,*,study
             seconds=time.monotonic()-start,blocks=len(rows),request_paths=requests,llm_requests=len(requests),
             recovery_llm_requests=max(0,len(requests)-1),actors=rows,stop_reason=stop_reason)
         generation=0.
-        if initial:
+        if initial and initial.get('request'):
             generation=json.loads((Path(initial['request'])/'receipt.json').read_text()).get('seconds',0.)
         result.update(initial_generation_seconds=generation,
                       execution_seconds=result['seconds']-(generation if generated_here else 0.),
                       end_to_end_seconds=result['seconds']+(0. if generated_here else generation))
         if recorded_recoveries:result['mode']='recorded_recovery_live_vision_NOT_new_model_experiment'
+        if initial and initial.get('origin')=='controlled_public_probe_NOT_LLM':result['mode']='controlled_public_program_NOT_LLM'
         if requests:result.update(receipt_summary(requests))
         save(dest/'result.json',result)
     print(json.dumps({k:result.get(k) for k in ('group','seed','study','ablation','raw_success','native_progress','api_calls','captures','llm_requests','seconds','error','last_error')},ensure_ascii=False,default=json_value),flush=True)

@@ -150,6 +150,7 @@ class SandboxProcess:
 
     def run(self, code, *, timeout=90.0):
         self.call_site = None
+        calls = 0
         source_lines = code.splitlines()
         out = {'ok': False, 'stdout': '', 'stderr': '', 'status': 'runtime_error', 'api_calls': 0}
         try:
@@ -196,13 +197,13 @@ class SandboxProcess:
             return dict(out, status='interrupted', stderr=str(exc), api_calls=calls)
         except TimeoutError as exc:
             self.close()
-            return dict(out, status='timeout', stderr=str(exc))
+            return dict(out, status='timeout', stderr=str(exc), api_calls=calls)
         except ValueError as exc:
             self.close()
-            return dict(out, status='policy_violation', stderr=str(exc))
+            return dict(out, status='policy_violation', stderr=str(exc), api_calls=calls)
         except Exception as exc:
             self.close()
-            return dict(out, status='system_error', stderr=str(exc))
+            return dict(out, status='system_error', stderr=str(exc), api_calls=calls)
 
     def close(self):
         if self.process:

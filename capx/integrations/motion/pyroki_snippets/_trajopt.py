@@ -21,6 +21,8 @@ def solve_trajopt(
     end_wxyz: ArrayLike,
     timesteps: int,
     dt: float,
+    start_joint_position: ArrayLike | None = None,
+    fixed_joint_indices: tuple[int, ...] = (),
 ) -> ArrayLike:
     if isinstance(start_position, onp.ndarray):
         np = onp
@@ -41,6 +43,15 @@ def solve_trajopt(
         target_position_1=jnp.array(end_position),
         target_wxyz_1=jnp.array(end_wxyz),
     )
+
+    # V35: bind planning to the actual public encoder configuration. The legacy
+    # pose-only mode is retained for reproduction, but is never a start permit.
+    if start_joint_position is not None:
+        value=onp.asarray(start_joint_position,dtype=float)
+        if value.shape != onp.asarray(start_cfg).shape or not onp.isfinite(value).all():
+            raise ValueError('Actual start joint vector required')
+        start_cfg=jnp.asarray(value)
+        if fixed_joint_indices:end_cfg=end_cfg.at[jnp.asarray(fixed_joint_indices)].set(start_cfg[jnp.asarray(fixed_joint_indices)])
 
     # 2. Initialize the trajectory through linearly interpolating the start and end poses.
     init_traj = jnp.linspace(start_cfg, end_cfg, timesteps)
@@ -64,6 +75,13 @@ def solve_trajopt(
             jnp.array([100.0])[None],
         ),
     ]
+
+    if start_joint_position is not None:
+        factors.append(pk.costs.self_collision_cost(robot,robot_coll,traj_vars,0.02,5.0))
+    if fixed_joint_indices:
+        indices=jnp.asarray(fixed_joint_indices)
+        factors.append(jaxls.Cost(lambda vals,var:((vals[var][...,indices]-start_cfg[indices])*1000.).flatten(),
+            (traj_vars,),name='fixed_noncommanded_joints'))
 
     # Collision avoidance.
     def compute_world_coll_residual(

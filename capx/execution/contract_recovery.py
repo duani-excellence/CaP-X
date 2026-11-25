@@ -94,7 +94,7 @@ class ConditionPlanner:
                     return dict(work='evidence',keys=[key],allowed_intents=[],condition=key)
                 blocked.append(dict(condition=key,truth=truth,reason='evidence_unavailable'))
                 return dict(work='blocked')
-            producers = [r for r in c.definition['intents'] if key in r['effects']]
+            producers = [r for r in c.definition['intents']+getattr(c,'producer_library',[]) if key in r['effects']]
             if not producers:
                 blocked.append(dict(condition=key,truth=truth,reason='no_producer'))
                 return dict(work='blocked')

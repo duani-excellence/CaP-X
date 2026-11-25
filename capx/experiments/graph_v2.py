@@ -167,7 +167,7 @@ def public_robot(obs):
     return {k:obs[k] for k in ('robot_joint_pos','robot_cartesian_pos') if k in obs}
 
 
-def base_prompt(env,task,group,budgets):
+def base_prompt(env,task,group,budgets,condition_text=None):
     if group=='B0':
         prompt=copy.deepcopy(env._full_prompt)
         docs='\n'.join(api.combined_doc() for api in env._apis.values())
@@ -179,7 +179,7 @@ def base_prompt(env,task,group,budgets):
             docs+='\nParent task definition: '+json.dumps(resolve_definition(budgets.get('task_definition',task)),sort_keys=True)
         prompt=[{'role':'system','content':'Generate Python using only the documented public robot and Vision APIs and numpy. No files, network, private attributes, env, obs or simulator state.'},
                 {'role':'user','content':env._task_prompt+'\nAPI documentation:\n'+docs}]
-    prompt.append({'role':'user','content':CONDITIONS[task]+'\nUse deployment-observable Vision/robot state only. '
+    prompt.append({'role':'user','content':(CONDITIONS[task] if condition_text is None else condition_text)+'\nUse deployment-observable Vision/robot state only. '
         +f"Budget: {budgets['api_budget']} actual API calls per episode, {budgets['max_blocks']} complete code blocks, {budgets['block_seconds']} seconds per block. "
         +'The physical scene persists across blocks; Python variables are discarded. FINISH is only a claim, not physical success.'})
     return prompt,docs
@@ -351,7 +351,7 @@ def simulator_termination(env):
         wrapper_steps=getattr(low,'_sim_step_count',None),wrapper_limit=getattr(low,'max_steps',None))
 
 
-def run_episode(output,task,seed,repeat,snapshot,config,budget,group,initial=None,*,fault='none',source_hashes=None):
+def run_episode(output,task,seed,repeat,snapshot,config,budget,group,initial=None,*,fault='none',source_hashes=None,environment_factory=None,condition_text=None):
     from capx.experiments.graph_feedback import check_pair,parse_graph_recovery,graph_recovery_prompt
     dest=Path(output)/'episodes'/group;dest.mkdir(parents=True,exist_ok=False)
     b=limits(config);b['graph_options']=graph_options(config,group);start=time.monotonic();request_start=budget.count
@@ -377,9 +377,9 @@ def run_episode(output,task,seed,repeat,snapshot,config,budget,group,initial=Non
             raise SourceChangedError('Frozen local source changed')
     try:
         guard_sources()
-        env=make_environment(task,dest/'trace',seed,snapshot,b['api_budget'])
+        env=(environment_factory or make_environment)(task,dest/'trace',seed,snapshot,b['api_budget'])
         if env.reset_info['initial_state_hash']!=snapshot['state_hash']:raise ValueError('Snapshot replay hash mismatch')
-        env.cfg.execution_timeout=b['block_seconds'];obs=env._get_observation();base,docs=base_prompt(env,task,group,b)
+        env.cfg.execution_timeout=b['block_seconds'];obs=env._get_observation();base,docs=base_prompt(env,task,group,b,condition_text)
         if hasattr(env,'evaluation_geometry'):save(dest/'evaluation-geometry.json',env.evaluation_geometry())
         else:result['evaluation_geometry_missing']=True
         save(dest/'initial-evaluation-state.json',env.evaluation_state())

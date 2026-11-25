@@ -119,6 +119,7 @@ def instrument_tools(env,dest):
                                 elapsed_seconds=time.monotonic()-start)
                     dump(path,record)
                     if arrays:np.savez_compressed(path.with_suffix('.npz'),**arrays)
+            wrapped.__wrapped__=original  # preserve diagnostic source without bypassing audit
             setattr(api,attr,wrapped)
 
 

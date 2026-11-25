@@ -221,6 +221,9 @@ def _build_world_coll(obstacles: list[dict[str, Any]] | None):
             p = np.array(obj["point"], dtype=np.float64)
             n = np.array(obj["normal"], dtype=np.float64)
             world.append(pk.collision.HalfSpace.from_point_and_normal(p, n))
+        elif t == 'sphere_cloud':
+            centers=np.array(obj['centers'],dtype=np.float64)
+            world.append(pk.collision.Sphere.from_center_and_radius(centers,np.full(len(centers),float(obj['radius']))))
         elif t == "sphere":
             c = np.array(obj["center"], dtype=np.float64)
             r = float(obj["radius"])

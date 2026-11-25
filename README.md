@@ -1,3 +1,7 @@
+**V36 审查修复版：** [使用说明与有界复跑命令](docs/feedback/graph-v36-review.md)、[真实配对及未完成项](docs/reports/graph-feedback-v36-reviewed-repair-2026-11-25.md)。修复进展计算、可信验证协调、派发回执、两层证据依赖与开放因果计划。保持原评分与安全边界；当前不是四物体任务或新轨迹后端验收通过声明。
+
+**V34 开放式 Coding Agent：** [共享 API、Belief、参数化规划与复跑命令](docs/feedback/graph-v34.md)。使用 `--harness open`；保留原 Sandbox、Broker、评分与安全阈值。开发结果及真实失败见 [V34 报告](docs/reports/graph-feedback-v34-development-2026-11-25.md)。
+
 **V33 持久化执行与模型恢复：** [架构、边界与命令](docs/feedback/graph-v33.md)。统一入口增加 `--harness persistent --recovery-requests 2`，G0/G1 共用；历史程序重放默认仍为零新增 LLM。工作台增加真实事件与恢复时间线。两次真实模型恢复与物理结果见 [V33 报告](docs/reports/graph-feedback-v33-development-2026-11-25.md)。Checkpoint 不回滚物理世界，也不自动恢复崩溃后的机器人进程。
 
 **V32 腕部六维力与有界抓持恢复：** [命令与使用说明](docs/feedback/graph-v32.md)。四组真实对比：`scripts/local/infer.sh run --task pick_place --methods G0 G1 --skill v32 --force-mode compare --seeds 0`。默认不开真实硬件；传感器型号尚未核实。
@@ -334,3 +338,7 @@ uv run --no-sync --active capx/envs/launch.py \
 - [V28：感知调用归因、精确证据复用与真实配对消融](docs/feedback/graph-v28.md)
 
 V29 自动因果构图、局部计划修复与真实配对命令见 [V29 使用说明](docs/feedback/graph-v29.md)。
+
+V35 预规划与 Decision State（开发版本）：见 [命令与工具说明](docs/feedback/graph-v35.md) 和 [真实验收报告](docs/reports/graph-feedback-v35-development-2026-11-25.md)。已支持零 LLM 候选/IK/轨迹诊断；倾斜持物路径尚未取得执行许可，未宣称四物体任务成功。
+
+V36 动态语义能力、统一工具契约与真实模型验收：见 [运行说明](docs/feedback/graph-v36.md) 和 [开发报告](docs/reports/graph-feedback-v36-development-2026-11-25.md)。真实 DeepSeek + Vision + F/T 的固定 Seed 0 完成 2/4；完整任务、新共享轨迹执行与跨任务能力复用仍未通过，不能视为正式评测就绪。

@@ -29,7 +29,7 @@ class EventStore:
                 self.sequence=row['sequence'];self.previous=signature;self._apply(row)
             # A lost worker cannot certify whether its last dispatched motion ran.
             for key,row in list(self.actions.items()):
-                if row['state']=='IN_FLIGHT':self.finish_action(key,'UNKNOWN',{'reason':'worker_restart_requires_current_state_reconciliation'})
+                if row['state'] in ('IN_FLIGHT','RETURNED','OBSERVED'):self.finish_action(key,'UNKNOWN',{'reason':'worker_restart_requires_current_state_reconciliation'})
 
     def _apply(self,row):
         d=row['data']
@@ -54,7 +54,7 @@ class EventStore:
         self.append('ActionStarted',data);self.append('ActionStarted',dict(data,state='IN_FLIGHT'))
 
     def finish_action(self,key,state,result):
-        if state not in ('DONE','FAILED','UNKNOWN'):raise ValueError('Invalid action lifecycle')
+        if state not in ('RETURNED','OBSERVED','DONE','FAILED','UNKNOWN'):raise ValueError('Invalid action lifecycle')
         if key not in self.actions:raise ValueError('No dispatch record')
         self.append('ActionResult',dict(action_id=key,state=state,result=result))
 

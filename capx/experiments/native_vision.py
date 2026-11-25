@@ -25,6 +25,82 @@ class PublicScene:
         self.roles=None;self.serial=0;self.cache={};self.source=None
         self.optimize=optimize;self.semantic_memory=ExactEvidenceCache();self.query_serial=0
         self.geometry_cache={};self.object_cache={};self.observation_key=None
+        self.region_diagnostics={};self.region_memory={};self.allow_region_memory=False
+
+    def calibration_key(self):
+        return ExactEvidenceCache.digest({k:{x:v[x] for x in ('intrinsics','pose_mat')} for k,v in self.obs.items() if isinstance(v,dict) and 'images' in v})
+
+    def remember_region(self,role,geometry,rows):
+        def selected(points):
+            p=np.asarray(points);return p[np.all((p[:,:2]>=np.asarray(geometry['lo'])-.01)&(p[:,:2]<=np.asarray(geometry['hi'])+.01),axis=1)]
+        walls=[];wall_cameras=[]
+        for row in rows:
+            for axis,points in row['walls']:
+                p=selected(points);planes=np.asarray(geometry['wall_planes'][axis])
+                # Only historically qualified fixture planes, not vertical
+                # object surfaces inside the semantic receptacle mask.
+                keep=(abs(p[:,axis,None]-planes[None,:]).min(1)<.0015)&(p[:,2]>geometry['floor_z']+.004)&(p[:,2]<geometry['floor_z']+.2)
+                walls.append((axis,p[keep]));wall_cameras.append(row.get('camera'))
+        self.region_memory[role]=dict(geometry=copy.deepcopy(geometry),walls=walls,wall_cameras=wall_cameras,
+            calibration=self.calibration_key(),source=self.source)
+
+    def corroborate_region(self,role,partial,floors,walls):
+        """Reproject historical wall samples, then refit CURRENT raw depth.
+
+        Missing walls cannot be supplied from history alone. The original 100
+        point / 80 mm / 15 mm plane support tests still apply to current points.
+        """
+        from capx.execution.region_geometry import receptacle_geometry,deproject,horizontal_pixels,axis_pixels
+        prior=self.region_memory.get(role)
+        if not prior or prior['calibration']!=self.calibration_key():return partial
+        current=[];stats=[]
+        for wall_index,(axis,points) in enumerate(prior['walls']):
+            if not len(points):continue
+            matched=[]
+            for name,cam in self.obs.items():
+                if not isinstance(cam,dict) or 'images' not in cam:continue
+                # A point was measured from one camera. Do not turn a ray
+                # from another viewpoint (never corroborated at the anchor)
+                # into a change detector, especially at silhouettes/depth gaps.
+                if name!=prior['wall_cameras'][wall_index]:continue
+                t=cam['pose_mat'];p=(points-t[:3,3])@t[:3,:3];uv=p@cam['intrinsics'].T
+                uv=uv[:,:2]/np.maximum(uv[:,2,None],1e-9);xy=np.rint(uv).astype(int)
+                depth=cam['images']['depth'].squeeze();h,w=depth.shape
+                good=(p[:,2]>0)&(xy[:,0]>=0)&(xy[:,0]<w)&(xy[:,1]>=0)&(xy[:,1]<h)
+                ids=np.flatnonzero(good);d=depth[xy[ids,1],xy[ids,0]]
+                # Match measured current 3D surface at historical location;
+                # occluded pixels are not filled and free rays are contradictions.
+                near=np.isfinite(d)&(d>0)&(abs(d-p[ids,2])<.0015)
+                contradiction=np.isfinite(d)&(d>p[ids,2]+.004)
+                if contradiction.sum()>=100:
+                    return dict(partial,history_rejected='historical_wall_now_observed_free',contradictory_points=int(contradiction.sum()))
+                xyz=deproject(cam);ij=xy[ids[near]];matched.append(xyz[ij[:,1],ij[:,0]])
+            pts=np.unique(np.concatenate(matched),axis=0) if matched else np.empty((0,3))
+            current.append((axis,pts));stats.append(dict(axis=axis,reference_points=len(points),current_matched_points=len(pts)))
+        fit=receptacle_geometry(np.concatenate(floors),walls+current)
+        old=prior['geometry']
+        if fit['status']!='PASS':
+            # Semantic masks can omit an otherwise depth-visible wall. Search
+            # current normal-qualified depth inside the historical association
+            # region, not only the old wall pixels. This uses CURRENT points and
+            # the exact original plane-support tests, never fills missing depth.
+            raw_floors=[];raw_walls=[]
+            for cam in self.obs.values():
+                if not isinstance(cam,dict) or 'images' not in cam:continue
+                xyz=deproject(cam)
+                mask=np.isfinite(xyz).all(-1)&np.all((xyz[:,:,:2]>=np.asarray(old['lo'])-.01)&(xyz[:,:,:2]<=np.asarray(old['hi'])+.01),axis=-1)
+                raw_floors.append(xyz[mask&horizontal_pixels(xyz)])
+                raw_walls.extend((axis,xyz[mask&axis_pixels(xyz,axis)]) for axis in (0,1))
+            if raw_floors:fit=receptacle_geometry(np.concatenate(raw_floors),raw_walls)
+            stats.append(dict(method='current_raw_depth_normal_refit_in_historical_association_region',status=fit['status']))
+        if fit['status']!='PASS':return dict(partial,history_check=stats,history_rejected=fit['reason'])
+        if any(not any(abs(p-q)<.0015 for q in fit['wall_planes'][axis]) for axis in (0,1) for p in old['wall_planes'][axis]):
+            return dict(partial,history_rejected='previously_observed_wall_not_reconfirmed')
+        if max(abs(np.array(fit['lo'])-old['lo']).max(),abs(np.array(fit['hi'])-old['hi']).max(),abs(fit['floor_z']-old['floor_z']))>.0015:
+            return dict(partial,history_rejected='current_geometry_contradicts_anchor')
+        return dict(fit,evidence_kind='current_raw_depth_reobserved_via_historical_wall_association',
+            historical_source=prior['source'],history_check=stats,current_source=self.source,
+            retained_geometry_is_permission=False)
 
     @evidence_scope
     def frame(self):
@@ -150,6 +226,9 @@ class PublicScene:
             if matched['source'] is matched['destination']:raise ValueError('Receptacle association collision')
             self.roles=matched
         self.emit('region_roles',roles=self.roles,source=self.source)
+        if self.allow_region_memory:
+            rows=self.candidates(self.region_query)
+            for role,g in self.roles.items():self.remember_region(role,g,rows)
         return self.roles
 
     @evidence_scope
@@ -165,14 +244,19 @@ class PublicScene:
         def selected(points):
             p=np.asarray(points);keep=np.all((p[:,:2]>=np.asarray(old['lo'])-.01)&(p[:,:2]<=np.asarray(old['hi'])+.01),axis=1)
             return p[keep]
-        for row in self.candidates(self.region_query):
+        rows=self.candidates(self.region_query)
+        for row in rows:
             floors.append(selected(row['floor_points']))
             walls.extend((axis,selected(points)) for axis,points in row['walls'])
         if not floors:raise ValueError('No current region evidence')
         fit=receptacle_geometry(np.concatenate(floors),walls)
-        if fit['status']!='PASS':raise ValueError('Region evidence incomplete: '+fit['reason'])
+        if fit['status']!='PASS' and self.allow_region_memory:fit=self.corroborate_region(role,fit,floors,walls)
+        self.region_diagnostics[role]=copy.deepcopy(dict(fit,source=self.source))
+        self.emit('region_geometry_diagnostic',role=role,fit=fit,source=self.source)
+        if fit['status']!='PASS':raise ValueError('Region evidence incomplete: '+fit['reason']+'; axis='+str(fit.get('axis')))
         if np.linalg.norm(np.asarray(fit['center'])-old['center'])>.01:raise ValueError('Region anchor contradicted')
         self.roles[role]=dict(fit,source=self.source)
+        if self.allow_region_memory and 'historical_source' not in fit:self.remember_region(role,self.roles[role],rows)
         self.emit('single_region_revalidation',role=role,geometry=self.roles[role],source=self.source)
         return self.roles[role]
 
