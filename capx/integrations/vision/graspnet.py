@@ -193,6 +193,7 @@ def init_contact_graspnet_point_clouds() -> Any:
         filter_grasps: bool = True,
         forward_passes: int = 2,
         max_retries: int = 10,
+        *, seed: int | None = None, timeout: float = 60.,
     ) -> tuple[np.ndarray | list, np.ndarray | list, np.ndarray | list]:
         """Call the GraspNet service with pre-computed point clouds."""
         payload = {
@@ -205,8 +206,9 @@ def init_contact_graspnet_point_clouds() -> Any:
             "max_retries": max_retries,
         }
 
+        if seed is not None:payload['seed']=int(seed)
         try:
-            resp = audited_post(f"{SERVICE_URL}/plan_point_clouds", json=payload)
+            resp = audited_post(f"{SERVICE_URL}/plan_point_clouds", json=payload, timeout=timeout)
             resp.raise_for_status()
             data = resp.json()
         except requests.RequestException as e:
@@ -214,6 +216,8 @@ def init_contact_graspnet_point_clouds() -> Any:
                 f"Failed to communicate with GraspNet service at {SERVICE_URL}: {e}"
             )
 
+        if seed is not None and data.get('seed')!=int(seed):
+            raise ConnectionError('Grasp service does not acknowledge request seed; use P0 server')
         grasps = _base64_to_numpy(data["grasps_base64"])
         scores = _base64_to_numpy(data["scores_base64"])
         contact_pts = _base64_to_numpy(data["contact_pts_base64"])

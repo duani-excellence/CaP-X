@@ -273,7 +273,7 @@ class RegionSkills:
         if error>=.004 or angular>=3:self.stop('physical TCP did not converge')
 
     @evidence_scope
-    def current_held(self):
+    def _held_measurement(self):
         h=self.held
         if h is None:self.stop('No established attachment')
         self.active_condition='held:'+h['object']
@@ -293,9 +293,16 @@ class RegionSkills:
             source='current_depth_in_kinematic_association_volume'
         self.emit('skill_tracking_source',object=h['object'],source=source,measured_points=len(cloud),capture=self.scene.source,
                   prediction_is_only_association=True)
+        self.last_held_cloud=(self.scene.source,np.asarray(cloud).copy())
         reg=register_rigid(h['model_points'],cloud,prediction)
         width=jaw_separation(self.scene.obs['robot_gripper_joint_pos'])
         self.emit('skill_hold_evidence',object=h['object'],registration=reg,gripper_width_m=width)
+        return carried_shape(h['shape'],reg['transform']) if 'transform' in reg else None,reg,width
+
+    @evidence_scope
+    def current_held(self):
+        shape,reg,width=self._held_measurement()
+        h=self.held
         if reg['status']!='PASS' or width<.004:self.stop('Hold check failed: '+reg['reason'])
         shape=carried_shape(h['shape'],reg['transform']);self.emit('skill_hold_check',object=h['object'],registration=reg,gripper_width_m=width,shape=shape)
         self.active_condition=None
@@ -343,13 +350,7 @@ class RegionSkills:
         return f
 
     @evidence_scope
-    def _compute_acquire_plan(self,name):
-        if self.held is not None:self.stop('Cannot acquire while another attachment exists')
-        roles={'source':self.region('source')}
-        try:g=self.scene.object(name,roles['source'])
-        except ValueError as exc:self.stop(str(exc))
-        limits=self.profile['shape_range_m']
-        if not limits[0]<=g['height_m']<=limits[1] or max(g['extent_xy'])>limits[2]:self.stop('Shape outside calibrated capability')
+    def _propose_grasps(self,g):
         view=max(g['views'],key=lambda r:r['mask'].sum());cam=self.scene.obs[view['camera']]
         transforms,scores,_=self.grasp(cam['images']['depth'].squeeze(),cam['intrinsics'],view['mask'].astype(np.int32),1,seed=self.seed,max_retries=2)
         if not len(scores):
@@ -357,6 +358,17 @@ class RegionSkills:
             if alternatives:
                 view=max(alternatives,key=lambda r:r['mask'].sum());cam=self.scene.obs[view['camera']]
                 transforms,scores,_=self.grasp(cam['images']['depth'].squeeze(),cam['intrinsics'],view['mask'].astype(np.int32),1,seed=self.seed,max_retries=2)
+        return transforms,scores,cam
+
+    @evidence_scope
+    def _compute_acquire_plan(self,name):
+        if self.held is not None:self.stop('Cannot acquire while another attachment exists')
+        roles={'source':self.region('source')}
+        try:g=self.scene.object(name,roles['source'])
+        except ValueError as exc:self.stop(str(exc))
+        limits=self.profile['shape_range_m']
+        if not limits[0]<=g['height_m']<=limits[1] or max(g['extent_xy'])>limits[2]:self.stop('Shape outside calibrated capability')
+        transforms,scores,cam=self._propose_grasps(g)
         candidates=[];depth=min(.02,g['height_m']/2);p=np.array(g['center']);p[2]=g['top_z']-depth
         # Existing calibrated CGN->Panda axis mapping. Projection changes the
         # candidate, so every projected pose is screened again before motion.
@@ -389,6 +401,7 @@ class RegionSkills:
             self.scene.candidates(self.scene.region_query),g['points'])
         selected=None
         for score,q,width in candidates:
+            if hasattr(self,'candidate_filter') and not self.candidate_filter(name,q):continue
             sweep=panda_open_sweep(p,q,neighbors,z_approach=.20)
             if sweep['status']!='PASS':continue
             if self.reachable(p,q) and self.reachable(p+[0,0,.2],q):selected=q;break

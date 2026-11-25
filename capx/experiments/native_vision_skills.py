@@ -14,7 +14,7 @@ from capx.execution.skill_contracts import ContractGraph,ContractBroker
 from capx.execution.graph_executive import GraphExecutive
 
 
-def region_task(bindings,grounded=False):
+def region_task(bindings,grounded=False,causal=False):
     rows=[];effects=[]
     for i,obj in enumerate(bindings):
         held='held:'+obj;goal='placed:'+obj;effects.append(goal)
@@ -32,6 +32,23 @@ def region_task(bindings,grounded=False):
             deposit['effects'] += ['robot_ready']
             for k in acquire['requires']+deposit['requires']:specs[k]=dict(observable=True)
         result['condition_specs']=specs
+    if causal:
+        # Public parameter domains and capability contracts, not a solution order.
+        values=[dict(object=obj,target=str(i)) for i,obj in enumerate(bindings)]
+        result['skill_library']=[dict(name='acquire',bindings=values,contract=dict(
+            skill='acquire',object='{object}',requires=['robot_ready','workspace_geometry','geometry:{object}','grasp_ready:{object}'],
+            effects=['held:{object}'],deletes=['robot_ready','placed:{object}'],
+            invalidates=['geometry:{object}','grasp_ready:{object}'],resources=['arm0'],cost=2.)),
+            dict(name='deposit',bindings=values,contract=dict(
+                skill='deposit',object='{object}',target='{target}',requires=['held:{object}','target_geometry:{target}'],
+                effects=['placed:{object}','robot_ready'],deletes=['held:{object}'],resources=['arm0'],cost=2.))]
+        from capx.execution.causal_plan import ground_library
+        library=ground_library(result)
+        for row in rows:
+            template=next(v for v in library if v['skill']==row['skill'] and v['object']==row['object'])
+            intent=row['id'];row.clear();row.update(template,id=intent)
+        for key,spec in result['condition_specs'].items():
+            spec['kind']='tool_data' if key.startswith(('geometry:','grasp_ready:','target_geometry:')) or key=='workspace_geometry' else 'physical'
     return result
 
 
@@ -57,7 +74,29 @@ def build_skills(boundary,spec):
             boundary.api.ik_solve_fn(target_pose_wxyz_xyz=np.r_[quat,hand],prev_cfg=boundary.api.cfg)
             return True
         except IKConvergenceError:return False
-    skills=RegionSkills(scene,boundary.trusted_motion,boundary.api.grasp_net_plan_fn,reachable,profile,seed=boundary.seed,emit=boundary.log)
+    cls=RegionSkills
+    if spec.get('skill_recovery_version',29)>=30:
+        from capx.execution.skill_recovery import RecoverableRegionSkills
+        cls=RecoverableRegionSkills
+    extra={}
+    if spec.get('skill_recovery_version',29)>=32:
+        from capx.execution.force_skills import ForceRegionSkills
+        cls=ForceRegionSkills;boundary.force_enabled=bool(spec.get('force_feedback',False))
+        def archive_cloud(points):
+            import uuid
+            root=boundary.root/'attachment-evidence';root.mkdir(exist_ok=True)
+            path=root/(uuid.uuid4().hex+'.npz');np.savez_compressed(path,observed_reference_points=points)
+            return str(path)
+        extra['archive_cloud']=archive_cloud
+        if boundary.force_enabled:
+            if boundary.force_sensor is None:raise ValueError('Force feedback requires a configured native sensor')
+            def evidence():
+                row=boundary.force_sensor.sample();return boundary.force_sensor.window.assess(row['timestamp'])
+            extra['force_evidence']=evidence
+    skills=cls(scene,boundary.trusted_motion,boundary.api.grasp_net_plan_fn,reachable,profile,seed=boundary.seed,emit=boundary.log,**extra)
+    if spec.get('skill_recovery_version',29)>=30:
+        from capx.integrations.vision.graspnet import init_contact_graspnet_point_clouds
+        skills.grasp_cloud=init_contact_graspnet_point_clouds()
     return skills
 
 

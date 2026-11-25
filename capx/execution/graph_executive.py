@@ -9,6 +9,21 @@ import copy
 
 
 class GraphExecutive:
+    def compile_contract_program(self, contracts, code, *, automatic=True):
+        from .causal_plan import CausalPlan, program_order, validate_sequence
+        order=program_order(code,contracts.intents)
+        check=validate_sequence({k:contracts.truth(k) for k in contracts.conditions},
+            [contracts.intents[i] for i in order],contracts.definition['goals'],
+            contracts.definition.get('condition_specs',{}),conditional=True,completed=contracts.completed)
+        # Missing initial facts without an observable contract remain a runtime
+        # obligation in legacy declarations, but proven conflicts are rejected.
+        if not check['valid'] and check.get('actual')=='FALSE':raise ValueError('Initial plan contradicts a predicted physical precondition')
+        return CausalPlan(contracts,order,automatic=automatic)
+
+    def repair_causal_plan(self, plan, library, **limits):
+        from .causal_plan import repair_plan
+        return repair_plan(plan,library,**limits)
+
     def repair_contract(self, contracts, planner):
         """Select a condition-regressed frontier; the parent enforces its work scope.
 

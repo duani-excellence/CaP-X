@@ -1,4 +1,14 @@
+**V33 持久化执行与模型恢复：** [架构、边界与命令](docs/feedback/graph-v33.md)。统一入口增加 `--harness persistent --recovery-requests 2`，G0/G1 共用；历史程序重放默认仍为零新增 LLM。工作台增加真实事件与恢复时间线。两次真实模型恢复与物理结果见 [V33 报告](docs/reports/graph-feedback-v33-development-2026-11-25.md)。Checkpoint 不回滚物理世界，也不自动恢复崩溃后的机器人进程。
+
+**V32 腕部六维力与有界抓持恢复：** [命令与使用说明](docs/feedback/graph-v32.md)。四组真实对比：`scripts/local/infer.sh run --task pick_place --methods G0 G1 --skill v32 --force-mode compare --seeds 0`。默认不开真实硬件；传感器型号尚未核实。
+
+当前验收：最终 8 个真实 DeepSeek episode 的完整 PickPlace 成功为 0/8；Seed 0 加入力觉的 G0/G1 都完成 Milk、Bread（2/4），随后因目标区域视觉缺证退出。完整结果、费用和限制见 [V32 开发报告](docs/reports/graph-feedback-v32-development-2026-11-24.md)。
+
+**V31 统一推理与实际执行图：** [使用说明](docs/feedback/graph-v31.md)。`scripts/local/infer.sh run --methods G0 G1`；前端 `scripts/local/infer.sh serve --host 127.0.0.1 --port 8200`，打开 `/#experiments`。支持矩阵、未接入能力和费用边界见说明。
+
 # CaP-X 常用指令速查
+
+V30 的共同阶段恢复、LOGIV 官方核心适配、真实 DeepSeek 配对及公开 LIBERO-Recovery 场景命令见 [V30 使用说明](docs/feedback/graph-v30.md)，结果见 [V30 开发报告](docs/reports/graph-feedback-v30-development-2026-11-24.md)。外部方法为后续主对照，G0/G1 为内部消融；原版复现、共同 Skill 适配、零 LLM 重放和环境协议验收分别统计。
 
 V27 的父进程图恢复授权、共同契约修复和真实 DeepSeek 四组消融命令见 [V27 使用说明](docs/feedback/graph-v27.md)，开发结果见 [V27 报告](docs/reports/graph-feedback-v27-development-2026-11-24.md)。该入口在无合法恢复能力或无进展时有界退出；不把受控退出计作物理成功。
 
@@ -322,3 +332,5 @@ uv run --no-sync --active capx/envs/launch.py \
 显存紧张时，把 `franka_robosuite_spill_wipe.yaml` 换成 `franka_robosuite_spill_wipe_privileged.yaml`。
 
 - [V28：感知调用归因、精确证据复用与真实配对消融](docs/feedback/graph-v28.md)
+
+V29 自动因果构图、局部计划修复与真实配对命令见 [V29 使用说明](docs/feedback/graph-v29.md)。

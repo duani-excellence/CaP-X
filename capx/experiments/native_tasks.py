@@ -118,7 +118,7 @@ class NativeBoundary:
     every RPC. Oracle-only functions are constructed only in explicit oracle
     mode; no fallback to them exists in vision mode.
     """
-    def __init__(self,spec,seed,root,mode='vision',expected_snapshot=None):
+    def __init__(self,spec,seed,root,mode='vision',expected_snapshot=None,sensor_config=None):
         from capx.experiments.vision_tasks import PublicLowLevel,public_robot_calibration
         from capx.integrations.franka.control import FrankaControlApi
         from capx.execution.bounded_ik import BoundedIK,IKSolveBudget
@@ -136,6 +136,26 @@ class NativeBoundary:
             self.low.close();raise ValueError('Initial snapshot replay mismatch')
         self.calibration=public_robot_calibration(self)
         save(self.root/'calibration.json',self.calibration)
+        self.force_sensor=None;self.force_enabled=False;self.force_guard=False
+        sensor_config=sensor_config or spec.get('force_sensor')
+        if sensor_config:
+            from capx.integrations.sensors.wrist_ft import MujocoWristFT
+            def record_force(row):
+                with (self.root/'force.jsonl').open('a') as f:f.write(json.dumps(row)+'\n')
+            self.force_sensor=MujocoWristFT(self.low,sensor_config,record_force)
+            save(self.root/'force-calibration.json',self.force_sensor.calibration)
+            def force_tick():
+                row=self.force_sensor.sample()
+                # Emergency boundary stop; no force-only movement/hold permission.
+                if self.force_enabled and self.force_guard:
+                    f=np.linalg.norm(row['external_base'][:3]);t=np.linalg.norm(row['external_base'][3:])
+                    if not row['valid'] or f>sensor_config.get('hard_force_n',40) or t>sensor_config.get('hard_torque_nm',4):
+                        from capx.execution.skill_contracts import SkillBoundaryStop
+                        self.low._current_joints=self.low.robosuite_env.sim.data.qpos[self.low.robosuite_env.robots[0]._ref_joint_pos_indexes].copy()
+                        self.log('force_guard_stop',sample=row)
+                        raise SkillBoundaryStop('Wrist force guard stopped motion',{})
+            self.low._physics_observer=force_tick
+            self.force_sensor.sample()
         urdf=next(x['path'] for x in self.calibration['sources'] if x['role']=='ik_urdf')
         self.api.ik_solve_fn=BoundedIK(self.api.ik_solve_fn,urdf_path=urdf,
             budget=IKSolveBudget(spec.get('api_budget',256)*8),
@@ -164,6 +184,8 @@ class NativeBoundary:
 
     def capture(self):
         obs=self.public.get_observation();index=getattr(self,'captures',0);self.captures=index+1
+        if self.force_enabled and self.force_sensor is not None:
+            obs['wrist_ft']=copy.deepcopy(self.force_sensor.sample())
         directory=self.root/'observations';directory.mkdir(exist_ok=True)
         files={}
         for camera in self.low.render_camera_names:
@@ -173,6 +195,8 @@ class NativeBoundary:
                 tcp=obs['robot_cartesian_pos'],joints=obs['robot_joint_pos'],gripper=obs['robot_gripper_joint_pos'])
             files[camera]=str(path)
         self.log('public_capture',capture=index,files=files,sim_time=float(self.low.robosuite_env.sim.data.time))
+        sink=getattr(self,'public_capture_sink',None)
+        if sink:sink(dict(capture=index,files=files,robot={k:obs[k] for k in ('robot_cartesian_pos','robot_joint_pos','robot_gripper_joint_pos','wrist_ft') if k in obs}))
         return obs
 
     def goto_pose(self,position,quaternion_wxyz,z_approach=0.):
@@ -188,7 +212,9 @@ class NativeBoundary:
         functions={'goto_pose':self.goto_pose,'open_gripper':self.api.open_gripper,
                    'close_gripper':self.api.close_gripper,'wait':self.wait_control}
         if name not in functions:raise ValueError('Unsupported trusted primitive')
-        return self._invoke(name,args,kwargs,functions[name])
+        self.force_guard=bool(self.force_enabled and name=='goto_pose')
+        try:return self._invoke(name,args,kwargs,functions[name])
+        finally:self.force_guard=False
 
     def wait_control(self,seconds):
         if not np.isfinite(seconds) or not 0<seconds<=1:raise ValueError('Bounded hold duration required')
@@ -201,7 +227,10 @@ class NativeBoundary:
         self.calls+=1
         if name in ('goto_pose','open_gripper','close_gripper','home_pose'):self.motion+=1
         before=physical_state(self.low.robosuite_env);started=time.monotonic();error=None;response=None
-        try:response=function(*args,**kwargs);return response
+        try:
+            observer=getattr(self,'action_observer',None)
+            response=observer(name,args,kwargs,function) if observer else function(*args,**kwargs)
+            return response
         except Exception as exc:error=str(exc);raise
         finally:self.log('api',name=name,args=args,kwargs=kwargs,response=response,error=error,
                          seconds=time.monotonic()-started,before=before,after=physical_state(self.low.robosuite_env))

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+const ExperimentWorkbench = lazy(() => import('./components/ExperimentWorkbench').then(m => ({ default: m.ExperimentWorkbench })));
 import { useTrialState } from './hooks/useTrialState';
 import { ConfigStartControl } from './components/ConfigStartControl';
 import { ChatPanel } from './components/ChatPanel';
@@ -8,6 +9,7 @@ const FALLBACK_CONFIG = 'env_configs/cube_stack/franka_robosuite_cube_stack_web.
 
 function App() {
   const trial = useTrialState();
+  const [workspace, setWorkspace] = useState(location.hash === '#experiments' ? 'experiments' : 'interactive');
   const [hasCheckedSession, setHasCheckedSession] = useState(false);
   const [splitPercent, setSplitPercent] = useState(60);
   const draggingRef = useRef(false);
@@ -68,13 +70,15 @@ function App() {
             <img src="/capx_logo.svg" alt="" className="w-7 h-7" />
             <h1 className="font-bold text-text-primary">CaP-X</h1>
           </div>
-          <ConfigStartControl state={trial.state} configPath={trial.configPath} error={trial.error}
-            loadConfig={trial.loadConfig} startTrial={trial.startTrial} stopTrial={trial.stopTrial} />
-          <span className="text-xs text-text-tertiary">其余参数使用默认配置</span>
+          <button className="px-3 py-1 rounded border border-surface-border" onClick={() => { setWorkspace(workspace === 'interactive' ? 'experiments' : 'interactive'); location.hash = workspace === 'interactive' ? 'experiments' : ''; }}>{workspace === 'interactive' ? '实验与图 V31' : '交互推理'}</button>
+          {workspace === 'interactive' && <ConfigStartControl state={trial.state} configPath={trial.configPath} error={trial.error}
+            loadConfig={trial.loadConfig} startTrial={trial.startTrial} stopTrial={trial.stopTrial} />}
+          <span className="text-xs text-text-tertiary">Sandbox · 独立物理评分</span>
         </div>
       </header>
+      {workspace === 'experiments' && <Suspense fallback={<div className="p-6">加载实验工作台…</div>}><ExperimentWorkbench /></Suspense>}
       {/* Main Content — Resizable Split */}
-      <main ref={containerRef} className="flex-1 flex overflow-hidden relative">
+      <main style={{display: workspace === 'interactive' ? 'flex' : 'none'}} ref={containerRef} className="flex-1 flex overflow-hidden relative">
         {/* Overlay to capture mouse during drag */}
         {isDragging && <div className="absolute inset-0 z-20" />}
 

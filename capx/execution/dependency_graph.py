@@ -45,6 +45,8 @@ class DependencyGraph:
         event = _plain(dict(sequence=len(self.events) + 1, action=action, **fields))
         self.events.append(event)
         self.emit(copy.deepcopy(event))
+        from .graph_journal import publish
+        publish(self, event)
 
     def _ids(self, ids):
         ids = [ids] if isinstance(ids, str) else list(ids)

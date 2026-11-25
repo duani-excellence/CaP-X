@@ -54,6 +54,19 @@ def create_app() -> FastAPI:
 
     from capx.web.multitask import router as multitask_router
     app.include_router(multitask_router)
+    from capx.web.experiments import router as experiments_router
+    app.include_router(experiments_router)
+
+    @app.middleware('http')
+    async def local_experiment_mutations(request, call_next):
+        # New experiment controls are local; reject cross-site browser writes.
+        if request.url.path.startswith('/api/experiments') and request.method == 'POST':
+            from urllib.parse import urlsplit
+            origin = request.headers.get('origin')
+            if origin and urlsplit(origin).netloc != request.headers.get('host'):
+                from fastapi.responses import JSONResponse
+                return JSONResponse({'detail': 'Same-origin experiment control required'}, status_code=403)
+        return await call_next(request)
 
     # CORS for frontend dev server
     app.add_middleware(
@@ -177,6 +190,9 @@ def create_app() -> FastAPI:
     async def start_trial(request: StartTrialRequest):
         """Start a new trial execution."""
         selected_key = None
+        from capx.web.experiments import processes as unified_processes
+        if any(p.poll() is None for p in unified_processes.values()):
+            raise HTTPException(409, '统一推理作业正在运行，请等待或停止')
         from capx.web.multitask import processes as multitask_processes
         if any(p.poll() is None for p in multitask_processes.values()):
             raise HTTPException(409, '多任务作业正在运行，请等待或停止')

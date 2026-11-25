@@ -1,0 +1,17 @@
+{
+  "schema": "capx.native_wrist_bounds.v1",
+  "source": "outputs/model_comparison/graph_v32_20261124_221234/sensor-gate-v3/result.json",
+  "sha256": "7f09a7d06d572fa8b56604701dbecb183ea5ba787f4c88f9d4a1cbea796f9d6f",
+  "force_error_bound_n": 0.005,
+  "torque_error_bound_nm": 0.002,
+  "scope": "ideal MuJoCo wrist; quasistatic tested loads; no hardware calibration",
+  "force_axes_loads_n": [
+    0.02,
+    0.05,
+    0.2
+  ],
+  "torque_axes_loads_nm": [
+    0.002,
+    0.02
+  ]
+}

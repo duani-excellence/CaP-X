@@ -10,7 +10,7 @@ def analyze(root):
     config=json.loads((Path(root)/'config.json').read_text())
     for file in sorted(Path(root).glob('*/result.json')):
         r=json.loads(file.read_text())
-        if r.get('schema') not in ('capx.contract_models.v26','capx.contract_models.v27','capx.contract_models.v28'):continue
+        if r.get('schema') not in ('capx.contract_models.v26','capx.contract_models.v27','capx.contract_models.v28','capx.contract_models.v29','capx.contract_models.v30'):continue
         events=[];trace=file.parent/'trace.jsonl'
         if trace.exists():events=[json.loads(x) for x in trace.read_text().splitlines()]
         http=file.parent.parent/(file.parent.name+'-http.jsonl');times=collections.defaultdict(float);counts=collections.Counter()
@@ -29,7 +29,9 @@ def analyze(root):
         interruptions=[i for i,a in enumerate(r.get('actors',[])) if a['status']=='interrupted']
         recovery_calls=[]
         for i in interruptions:
-            before=json.loads((file.parent/f'actor-{i:02d}-public.json').read_text())['completed_calls']
+            public=file.parent/f'actor-{i:02d}-public.json'
+            if not public.exists():continue  # external engine has its own event trace
+            before=json.loads(public.read_text())['completed_calls']
             later=set(r.get('completed_calls',[]))-set(before)
             recovery_calls.append(dict(after_block=i,new_completed_calls=sorted(later)))
         policy=[e for e in events if e['kind']=='model_contract']
@@ -40,7 +42,17 @@ def analyze(root):
             restored=next((i for i in range(expiry[0]+1,len(events)) if events[i]['kind']=='model_contract' and
                 events[i].get('event') in ('recovery_evidence','planned_evidence') and events[i].get('observed',{}).get(expiry[1],{}).get('truth')=='TRUE'),None)
         row={k:r.get(k) for k in ('group','seed','study','ablation','raw_success','reward','seconds','end_to_end_seconds','execution_seconds','api_calls','captures','llm_requests','recovery_llm_requests','input_tokens','output_tokens','cost_usd','last_error','error','fault_triggered','repairs')}
-        row.update(native_goals=n,api_per_native_goal=r.get('api_calls',0)/n if n else None,
+        row.update(variant=file.parent.name,method=r.get('method','capx'),mode=r.get('mode'),
+            new_llm_requests=r.get('new_llm_requests'),
+            external_result=json.loads((file.parent/'external-method.json').read_text()) if (file.parent/'external-method.json').exists() else None,
+            stage_recovery_attempts=[e for e in events if e['kind']=='skill_recovery_stage'],
+            stage_recovery_successes=[e for e in events if e['kind']=='skill_recovery_success'],
+            attachment_probes=[e for e in events if e['kind']=='skill_attachment_probe'],
+            pointcloud_fallbacks=[e for e in events if e['kind']=='skill_multiview_grasp_fallback'],
+            causal_decisions=[e for e in policy if e.get('event')=='causal_repair_decision'],
+            deterministic_continuations=[e for e in policy if e.get('event')=='deterministic_continuation'],
+            causal_patches=sum(e.get('event')=='causal_repair_decision' and e.get('decision',{}).get('status')=='ready' for e in policy),
+            native_goals=n,api_per_native_goal=r.get('api_calls',0)/n if n else None,
             api_breakdown=dict(api_names),physical_motion_calls=sum(api_names[k] for k in ('goto_pose','open_gripper','close_gripper','wait')),
             evidence_expiry_restored=restored is not None,
             post_revalidation_motion_calls=sum(e['kind']=='api' and e.get('name') in ('goto_pose','open_gripper','close_gripper','wait') for e in events[restored+1:]) if restored is not None else 0,

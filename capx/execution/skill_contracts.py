@@ -78,6 +78,7 @@ class ContractGraph:
         if old:self.graph.invalidate([old],reason='condition evidence replaced')
         node=self.graph.add('condition',dict(key=key,truth=truth,evidence=copy.deepcopy(evidence)),key=key,parents=parents)
         self.conditions[key]=node
+        if getattr(self,'future_plan',None):self.future_plan.observe(key,node)
         return node
 
     def truth(self,key):
@@ -101,20 +102,21 @@ class ContractGraph:
         row=self.intents[intent]
         if not self.order_satisfied(row):raise ValueError('Unfinished predecessor')
         if any(r in self.locks for r in row.get('resources',[])):raise ValueError('Robot resource busy')
-        keys=row.get('requires',[])
-        if any(self.truth(k)!='TRUE' for k in keys):raise ValueError('Missing precondition evidence')
-        token=uuid.uuid4().hex;deps={k:self.conditions[k] for k in keys}
+        keys=list(dict.fromkeys(row.get('requires',[])+row.get('data_requires',[])))
+        if any(self.truth(k)!='TRUE' for k in keys) or any(self.truth(k)!='FALSE' for k in row.get('requires_false',[])):raise ValueError('Missing precondition evidence')
+        keys=list(dict.fromkeys(keys+row.get('requires_false',[])))
+        token=uuid.uuid4().hex;deps={k:self.conditions[k] for k in keys};expected={k:self.truth(k) for k in keys}
         parents=list(deps.values())+[self.intent_nodes[intent]]
         if self.program_node:parents.append(self.program_node)
         node=self.graph.add('plan',dict(intent=intent,permission=token),parents=parents)
-        self.permissions[token]=dict(intent=intent,dependencies=deps,node=node)
+        self.permissions[token]=dict(intent=intent,dependencies=deps,expected=expected,node=node)
         for r in row.get('resources',[]):self.locks[r]=token
         return token
 
     def check_permission(self,token):
         p=self.permissions[token]
         if self.quarantined or not self.graph.nodes[p['node']]['valid'] or any(
-            self.conditions.get(k)!=n or self.truth(k)!='TRUE' for k,n in p['dependencies'].items()):
+            self.conditions.get(k)!=n or self.truth(k)!=p.get('expected',{}).get(k,'TRUE') for k,n in p['dependencies'].items()):
             raise ValueError('stale physical permission')
         return p['intent']
 
@@ -125,7 +127,8 @@ class ContractGraph:
         p=self.permissions.pop(token);row=self.intents[p['intent']]
         call=self.graph.add('call',dict(intent=p['intent'],returned=True),parents=[(p['node'],'attestation')],state='done')
         self.completed[p['intent']]=call;self._unlock(token)
-        for key in row['effects']:
+        if getattr(self,'future_plan',None):self.future_plan.returned(p['intent'],call,'returned')
+        for key in list(dict.fromkeys(row['effects']+row.get('deletes',[]))):
             parents=[self.conditions[k] for k in row.get('effect_dependencies',{}).get(key,[]) if k in self.conditions]
             parents.append((call,'attestation'))
             verified=verified_effects.get(key,'UNKNOWN')
@@ -138,6 +141,7 @@ class ContractGraph:
         p=self.permissions.pop(token);self._unlock(token)
         self.stopped.add(p['intent'])
         call=self.graph.add('call',dict(intent=p['intent'],returned=False,known_effect=known_effect),parents=[(p['node'],'attestation')],state='done')
+        if getattr(self,'future_plan',None):self.future_plan.returned(p['intent'],call,'known_stop' if known_effect else 'unknown_effect')
         if not known_effect:self.quarantined=True
         return call
 
@@ -217,26 +221,28 @@ class ContractBroker:
         c=self.contracts;row=c.intents[intent_id]
         if row['skill'] not in self.capabilities:raise ValueError('Unqualified skill capability')
         # The last capture/verification happens BEFORE acquiring the live lease.
-        self.refresh(row.get('requires',[]))
+        self.refresh(list(dict.fromkeys(row.get('requires',[])+row.get('requires_false',[])+row.get('data_requires',[]))))
         token=c.admit(intent_id);c.check_permission(token)
         started=time.monotonic();self.calls+=1
+        from .graph_journal import publish
+        publish(c.graph,dict(action='dispatch',node_id=c.intent_nodes[intent_id],intent=intent_id,permission_node=c.permissions[token]['node']))
         try:
             self.capabilities[row['skill']](copy.deepcopy(row))
-            for key in row.get('invalidates',[]):
+            for key in list(dict.fromkeys(row.get('invalidates',[])+row.get('deletes',[]))):
                 c.observe(key,'UNKNOWN',dict(reason='declared_skill_effect',intent=intent_id))
-            keys=list(dict.fromkeys(row['effects']+(row.get('invalidates',[]) if self.sync_invalidates else [])))
+            keys=list(dict.fromkeys(row['effects']+row.get('deletes',[])+(row.get('invalidates',[]) if self.sync_invalidates else [])))
             effects=self.verify(keys)
             c.finish(token,effects)
             if self.sync_invalidates:
                 call=c.completed[intent_id]
-                for key in row.get('invalidates',[]):
+                for key in list(dict.fromkeys(row.get('invalidates',[])+row.get('deletes',[]))):
                     v=effects.get(key,dict(truth='UNKNOWN',evidence={'reason':'missing_verifier'}))
                     c.observe(key,v['truth'],v['evidence'],parents=[(call,'attestation')])
             self.emit(dict(intent=intent_id,status='returned',effects=effects,seconds=time.monotonic()-started))
             return dict(effects={k:c.truth(k) for k in row['effects']},call_id=c.completed[intent_id])
         except SkillBoundaryStop as exc:
             call=c.abort(token,known_effect=True) if token in c.permissions else None
-            for key in row.get('invalidates',[]):
+            for key in list(dict.fromkeys(row.get('invalidates',[])+row.get('deletes',[]))):
                 c.observe(key,'UNKNOWN',dict(reason='possible_partial_skill_effect',intent=intent_id))
             for key,value in exc.effects.items():
                 c.observe(key,value['truth'],value['evidence'],parents=[(call,'attestation')] if call else [])

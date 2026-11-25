@@ -29,6 +29,8 @@ def start(request:JobRequest):
     for task in request.targets:
         try:require_ready(task)
         except ValueError as exc:raise HTTPException(400,str(exc))
+    from capx.web.experiments import processes as unified_processes
+    if any(p.poll() is None for p in unified_processes.values()):raise HTTPException(409,'统一推理作业正在运行，请等待或停止')
     if any(p.poll() is None for p in processes.values()):raise HTTPException(409,'已有多任务进程运行，请等待或停止')
     from capx.web.session_manager import get_session_manager
     if any(str(r.get('state')) in ('running','awaiting_user_input','loading_config') for r in get_session_manager().list_sessions()):raise HTTPException(409,'请先停止当前交互推理')
